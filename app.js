@@ -1,17 +1,34 @@
 const video = document.getElementById("video");
 const canvas = document.getElementById("canvas");
 const preview = document.getElementById("preview");
+const cameraPlaceholder = document.getElementById("cameraPlaceholder");
+
 const startCameraBtn = document.getElementById("startCameraBtn");
 const takePhotoBtn = document.getElementById("takePhotoBtn");
 const resetBtn = document.getElementById("resetBtn");
+const clearHistoryBtn = document.getElementById("clearHistoryBtn");
+const installBtn = document.getElementById("installBtn");
+
 const fileInput = document.getElementById("fileInput");
 const resultBox = document.getElementById("resultBox");
+const historyList = document.getElementById("historyList");
 
 let stream = null;
 let currentImageData = null;
+let deferredPrompt = null;
+
+const STORAGE_KEY = "plant_ai_history_v1";
 
 function setResultMessage(html) {
   resultBox.innerHTML = html;
+}
+
+function showPlaceholder() {
+  cameraPlaceholder.classList.remove("hidden");
+}
+
+function hidePlaceholder() {
+  cameraPlaceholder.classList.add("hidden");
 }
 
 async function startCamera() {
@@ -38,19 +55,28 @@ async function startCamera() {
     video.srcObject = stream;
     video.classList.remove("hidden");
     preview.classList.add("hidden");
+    hidePlaceholder();
 
     takePhotoBtn.disabled = false;
     resetBtn.disabled = false;
 
     setResultMessage(`
-      <strong>Fotocamera attiva.</strong><br>
-      Inquadra bene foglie e pianta, poi premi <b>Scatta foto</b>.
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Fotocamera attiva</div>
+          Inquadra bene la pianta, meglio se si vedono foglie e parte centrale.
+        </div>
+      </div>
     `);
   } catch (error) {
     console.error("Errore apertura fotocamera:", error);
     setResultMessage(`
-      <strong>Impossibile aprire la fotocamera.</strong><br>
-      Controlla i permessi del browser oppure usa il caricamento manuale della foto.
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Impossibile aprire la fotocamera</div>
+          Controlla i permessi del browser oppure usa il caricamento manuale della foto.
+        </div>
+      </div>
     `);
   }
 }
@@ -66,8 +92,12 @@ function stopCamera() {
 function takePhoto() {
   if (!stream) {
     setResultMessage(`
-      <strong>Fotocamera non attiva.</strong><br>
-      Apri prima la fotocamera oppure carica una foto.
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Fotocamera non attiva</div>
+          Apri prima la fotocamera oppure carica una foto.
+        </div>
+      </div>
     `);
     return;
   }
@@ -77,8 +107,12 @@ function takePhoto() {
 
   if (!width || !height) {
     setResultMessage(`
-      <strong>Attendi un momento.</strong><br>
-      La fotocamera si sta inizializzando, poi riprova.
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Attendi un momento</div>
+          La fotocamera si sta inizializzando, poi riprova.
+        </div>
+      </div>
     `);
     return;
   }
@@ -94,6 +128,7 @@ function takePhoto() {
   preview.src = currentImageData;
   preview.classList.remove("hidden");
   video.classList.add("hidden");
+  hidePlaceholder();
 
   analyzeCurrentImage();
 }
@@ -106,13 +141,19 @@ function resetPhoto() {
 
   if (stream) {
     video.classList.remove("hidden");
+    hidePlaceholder();
     setResultMessage(`
-      <strong>Pronto per una nuova foto.</strong><br>
-      Inquadra la pianta oppure carica una nuova immagine.
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Pronto per una nuova foto</div>
+          Inquadra la pianta oppure carica una nuova immagine.
+        </div>
+      </div>
     `);
   } else {
     video.classList.add("hidden");
     takePhotoBtn.disabled = true;
+    showPlaceholder();
     setResultMessage("Nessuna immagine caricata.");
   }
 }
@@ -123,8 +164,12 @@ function handleFileUpload(event) {
 
   if (!file.type.startsWith("image/")) {
     setResultMessage(`
-      <strong>File non valido.</strong><br>
-      Seleziona un'immagine della pianta.
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">File non valido</div>
+          Seleziona un'immagine della pianta.
+        </div>
+      </div>
     `);
     return;
   }
@@ -136,6 +181,7 @@ function handleFileUpload(event) {
     preview.src = currentImageData;
     preview.classList.remove("hidden");
     video.classList.add("hidden");
+    hidePlaceholder();
     resetBtn.disabled = false;
 
     analyzeCurrentImage();
@@ -143,8 +189,12 @@ function handleFileUpload(event) {
 
   reader.onerror = function () {
     setResultMessage(`
-      <strong>Errore lettura file.</strong><br>
-      Non sono riuscito a caricare l'immagine selezionata.
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Errore lettura file</div>
+          Non sono riuscito a caricare l'immagine selezionata.
+        </div>
+      </div>
     `);
   };
 
@@ -158,61 +208,63 @@ function analyzeCurrentImage() {
   }
 
   setResultMessage(`
-    <strong>Analisi in corso...</strong><br>
-    Sto valutando aspetto generale, stato foglie e primi consigli.
+    <div class="result-card">
+      <div class="result-section">
+        <div class="result-title">Analisi in corso...</div>
+        Sto valutando aspetto generale, stato foglie e primi consigli.
+      </div>
+    </div>
   `);
 
   setTimeout(() => {
     const analysis = generateDemoAnalysis();
+    renderAnalysis(analysis);
+    saveAnalysisToHistory(analysis, currentImageData);
+    renderHistory();
+  }, 1100);
+}
 
-    setResultMessage(`
-      <div style="display:grid; gap:12px;">
-        <div>
-          <strong>Pianta probabile:</strong><br>
-          ${analysis.plant}
-        </div>
-
-        <div>
-          <strong>Stato visivo:</strong><br>
-          ${analysis.health}
-        </div>
-
-        <div>
-          <strong>Bisogno d'acqua:</strong><br>
-          ${analysis.water}
-        </div>
-
-        <div>
-          <strong>Luce consigliata:</strong><br>
-          ${analysis.light}
-        </div>
-
-        <div>
-          <strong>Possibili cause:</strong><br>
-          ${analysis.causes.map((item) => `• ${item}`).join("<br>")}
-        </div>
-
-        <div>
-          <strong>Cure consigliate:</strong><br>
-          ${analysis.care.map((item) => `• ${item}`).join("<br>")}
-        </div>
-
-        <div style="padding:10px; border-radius:12px; background:#fff8e1; border:1px solid #ffe082;">
-          <strong>Nota:</strong><br>
-          Questa è una prima analisi dimostrativa. Nel prossimo passo collegheremo il riconoscimento reale della pianta.
-        </div>
+function renderAnalysis(analysis) {
+  setResultMessage(`
+    <div class="result-card">
+      <div class="result-top">
+        <div class="result-chip">🌿 ${analysis.plant}</div>
+        <div class="result-chip">📊 Affidabilità: ${analysis.confidence}%</div>
+        <div class="result-chip">💧 Acqua: ${analysis.water}</div>
+        <div class="result-chip">☀️ Luce: ${analysis.light}</div>
       </div>
-    `);
-  }, 1200);
+
+      <div class="result-section">
+        <div class="result-title">Stato visivo</div>
+        ${analysis.health}
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Possibili cause</div>
+        ${analysis.causes.map((item) => `• ${item}`).join("<br>")}
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Cure consigliate</div>
+        ${analysis.care.map((item) => `• ${item}`).join("<br>")}
+      </div>
+
+      <div class="note-box">
+        <strong>Nota</strong><br>
+        Questa è una prima analisi dimostrativa. Nel prossimo step collegheremo il riconoscimento reale della pianta.
+      </div>
+    </div>
+  `);
 }
 
 function generateDemoAnalysis() {
   const demoResults = [
     {
       plant: "Monstera Deliciosa",
-      health: "Buona, con lieve stress sulle foglie",
+      confidence: 91,
+      health: "Buona, con lieve stress sulle foglie.",
       water: "Medio",
-      light: "Luce intensa ma indiretta",
+      light: "Intensa indiretta",
       causes: [
         "leggera carenza di umidità",
         "irrigazione non perfettamente regolare",
@@ -226,9 +278,10 @@ function generateDemoAnalysis() {
     },
     {
       plant: "Pothos",
-      health: "Discreto, con alcuni segnali di affaticamento",
+      confidence: 87,
+      health: "Discreto, con alcuni segnali di affaticamento.",
       water: "Medio-alto",
-      light: "Luce indiretta moderata",
+      light: "Indiretta moderata",
       causes: [
         "terreno troppo asciutto",
         "aria secca",
@@ -242,9 +295,10 @@ function generateDemoAnalysis() {
     },
     {
       plant: "Sansevieria",
-      health: "Buono, ma con possibile stress da eccesso d'acqua",
+      confidence: 89,
+      health: "Buono, ma con possibile stress da eccesso d'acqua.",
       water: "Basso",
-      light: "Luce indiretta o mezz'ombra luminosa",
+      light: "Mezz'ombra luminosa",
       causes: [
         "troppa acqua rispetto al fabbisogno",
         "drenaggio insufficiente",
@@ -258,9 +312,10 @@ function generateDemoAnalysis() {
     },
     {
       plant: "Ficus elastica",
-      health: "Leggero ingiallimento fogliare",
+      confidence: 85,
+      health: "Leggero ingiallimento fogliare.",
       water: "Medio",
-      light: "Luce intensa indiretta",
+      light: "Intensa indiretta",
       causes: [
         "stress da posizione",
         "irrigazione irregolare",
@@ -278,6 +333,88 @@ function generateDemoAnalysis() {
   return demoResults[index];
 }
 
+function getHistory() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (error) {
+    console.error("Errore lettura storico:", error);
+    return [];
+  }
+}
+
+function saveHistory(history) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+}
+
+function saveAnalysisToHistory(analysis, imageData) {
+  const history = getHistory();
+
+  history.unshift({
+    id: Date.now(),
+    imageData,
+    plant: analysis.plant,
+    confidence: analysis.confidence,
+    health: analysis.health,
+    water: analysis.water,
+    light: analysis.light,
+    date: new Date().toLocaleString("it-IT")
+  });
+
+  const trimmed = history.slice(0, 10);
+  saveHistory(trimmed);
+}
+
+function renderHistory() {
+  const history = getHistory();
+
+  if (!history.length) {
+    historyList.innerHTML = `<div class="history-empty">Nessuna analisi salvata.</div>`;
+    return;
+  }
+
+  historyList.innerHTML = history
+    .map(
+      (item) => `
+        <div class="history-item">
+          <img src="${item.imageData}" alt="${item.plant}" class="history-thumb" />
+          <div class="history-body">
+            <div class="history-name">${item.plant}</div>
+            <div class="history-meta">
+              Stato: ${item.health}<br>
+              Acqua: ${item.water}<br>
+              Luce: ${item.light}<br>
+              Affidabilità: ${item.confidence}%
+            </div>
+            <div class="history-date">${item.date}</div>
+          </div>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function clearHistory() {
+  localStorage.removeItem(STORAGE_KEY);
+  renderHistory();
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredPrompt = event;
+  installBtn.classList.remove("hidden");
+});
+
+installBtn.addEventListener("click", async () => {
+  if (!deferredPrompt) return;
+
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  installBtn.classList.add("hidden");
+});
+
+clearHistoryBtn.addEventListener("click", clearHistory);
 window.addEventListener("beforeunload", stopCamera);
 
 startCameraBtn.addEventListener("click", startCamera);
@@ -285,4 +422,6 @@ takePhotoBtn.addEventListener("click", takePhoto);
 resetBtn.addEventListener("click", resetPhoto);
 fileInput.addEventListener("change", handleFileUpload);
 
+renderHistory();
 setResultMessage("Nessuna immagine caricata.");
+showPlaceholder();
