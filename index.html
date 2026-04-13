@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plant AI</title>
   <meta name="theme-color" content="#2e7d32" />
-  <meta name="description" content="Webapp per fotografare piante, riconoscerle e ricevere consigli di cura." />
+  <meta name="description" content="Webapp per fotografare piante, valutarne lo stato e salvare lo storico delle analisi." />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -13,12 +13,20 @@
   <div class="app-shell">
     <header class="hero">
       <div class="hero-content">
-        <div class="hero-badge">🌿 AI Plant Scanner</div>
-        <h1>Fotografa la tua pianta e scopri come sta</h1>
-        <p>
-          Scatta una foto oppure caricala dal telefono per ottenere un’analisi
-          semplice, chiara e pronta da migliorare con il riconoscimento AI reale.
-        </p>
+        <div class="hero-top">
+          <div>
+            <div class="hero-badge">🌿 AI Plant Scanner</div>
+            <h1>Fotografa la tua pianta e scopri come sta</h1>
+            <p>
+              Scatta una foto oppure caricala dal telefono per ottenere
+              un’analisi della pianta e salvare lo storico delle verifiche.
+            </p>
+          </div>
+
+          <div class="hero-actions">
+            <button id="installBtn" class="install-btn hidden">Installa app</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -26,7 +34,7 @@
       <section class="panel panel-camera">
         <div class="panel-header">
           <h2>Fotocamera e caricamento</h2>
-          <p>Usa la fotocamera del telefono o carica una foto già presente nella galleria.</p>
+          <p>Usa la fotocamera del telefono o carica una foto dalla galleria.</p>
         </div>
 
         <div class="camera-frame">
@@ -67,7 +75,7 @@
 
       <section class="panel panel-info">
         <div class="panel-header">
-          <h2>Cosa potrà fare questa app</h2>
+          <h2>Funzioni dell’app</h2>
         </div>
 
         <div class="feature-list">
@@ -99,9 +107,23 @@
             <div class="feature-icon">📱</div>
             <div>
               <strong>Installabile sul telefono</strong><br />
-              Webapp pronta per diventare una PWA semplice da usare ovunque.
+              Webapp pronta per diventare una PWA da usare ovunque.
             </div>
           </div>
+        </div>
+      </section>
+
+      <section class="panel panel-history">
+        <div class="panel-header history-header">
+          <div>
+            <h2>Storico analisi</h2>
+            <p>Le ultime analisi salvate direttamente sul tuo dispositivo.</p>
+          </div>
+          <button id="clearHistoryBtn" class="danger-btn">Cancella storico</button>
+        </div>
+
+        <div id="historyList" class="history-list">
+          <div class="history-empty">Nessuna analisi salvata.</div>
         </div>
       </section>
     </main>
