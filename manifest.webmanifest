@@ -5,6 +5,7 @@
   "display": "standalone",
   "background_color": "#f4f7f3",
   "theme_color": "#2e7d32",
+  "description": "Webapp per riconoscere piante, valutarne lo stato e salvare lo storico.",
   "icons": [
     {
       "src": "icon-192.png",
