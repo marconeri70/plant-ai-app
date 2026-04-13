@@ -18,7 +18,7 @@ let currentImageData = null;
 let deferredPrompt = null;
 
 const STORAGE_KEY = "plant_ai_history_v4";
-const PLANTNET_API_KEY = "INSERISCI_LA_TUA_API_KEY";
+const PLANTNET_API_KEY = "2b10OfTLt1KLLHWfjIAqvR3HDe";
 
 const PLANTNET_PROJECT = "all";
 const PLANTNET_ORGAN = "auto";
