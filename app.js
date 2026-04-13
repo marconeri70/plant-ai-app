@@ -17,19 +17,17 @@ let stream = null;
 let currentImageData = null;
 let deferredPrompt = null;
 
-const STORAGE_KEY = "plant_ai_history_v3";
-
-// Inserisci qui la tua API key Pl@ntNet
+const STORAGE_KEY = "plant_ai_history_v4";
 const PLANTNET_API_KEY = "INSERISCI_LA_TUA_API_KEY";
 
-// Riconoscimento specie
 const PLANTNET_PROJECT = "all";
 const PLANTNET_ORGAN = "auto";
 const PLANTNET_NB_RESULTS = 3;
 
-// Diagnosi malattie
 const DISEASES_NB_RESULTS = 3;
 const DISEASE_SCORE_THRESHOLD = 0.25;
+const DISEASE_RED_THRESHOLD = 0.65;
+const DISEASE_YELLOW_THRESHOLD = 0.25;
 
 function setResultMessage(html) {
   resultBox.innerHTML = html;
@@ -372,6 +370,7 @@ function mapCombinedResponseToAnalysis(speciesData, diseasesData) {
 
   const care = generateCareTipsFromPlantName(scientificName, commonName);
   const speciesHealth = generateVisualStatusMessage(confidence);
+  const diseaseInfo = parseDiseaseInfo(diseasesData);
 
   const alternatives = speciesData.results.slice(1, 3).map((item) => {
     const altName =
@@ -380,8 +379,6 @@ function mapCombinedResponseToAnalysis(speciesData, diseasesData) {
       "Specie alternativa";
     return `${altName} (${Math.round((item.score || 0) * 100)}%)`;
   });
-
-  const diseaseInfo = parseDiseaseInfo(diseasesData);
 
   return {
     plant: scientificName,
@@ -407,6 +404,7 @@ function parseDiseaseInfo(diseasesData) {
   if (!diseasesData || !Array.isArray(diseasesData.results) || diseasesData.results.length === 0) {
     return {
       status: "none",
+      severity: "green",
       title: "Nessuna diagnosi malattie disponibile",
       summary: "Il servizio non ha restituito risultati utili per la diagnosi."
     };
@@ -416,28 +414,38 @@ function parseDiseaseInfo(diseasesData) {
   const score = Number(top.score || 0);
   const scorePercent = Math.round(score * 100);
 
-  if (score < DISEASE_SCORE_THRESHOLD) {
+  const topResults = diseasesData.results.slice(0, 3).map((item) => ({
+    code: item.name || "N/D",
+    description: item.description || item.label || "Descrizione non disponibile",
+    scorePercent: Math.round((item.score || 0) * 100)
+  }));
+
+  if (score < DISEASE_YELLOW_THRESHOLD) {
     return {
       status: "low",
-      title: "Diagnosi troppo incerta",
-      summary: `Il risultato principale è troppo debole (${scorePercent}%). Conviene fare una foto più ravvicinata della parte malata.`,
-      topResults: diseasesData.results.slice(0, 3).map((item) => ({
-        code: item.name || "N/D",
-        description: item.description || item.label || "Descrizione non disponibile",
-        scorePercent: Math.round((item.score || 0) * 100)
-      }))
+      severity: "green",
+      title: "Nessun problema rilevante",
+      summary: `Il risultato malattie è molto debole (${scorePercent}%). Al momento non emerge un problema affidabile.`,
+      topResults
+    };
+  }
+
+  if (score >= DISEASE_YELLOW_THRESHOLD && score < DISEASE_RED_THRESHOLD) {
+    return {
+      status: "warning",
+      severity: "yellow",
+      title: "Possibile problema da controllare",
+      summary: `${top.description || "Problema non descritto"} (${scorePercent}%). Conviene controllare la pianta e fare una foto più ravvicinata.`,
+      topResults
     };
   }
 
   return {
     status: "detected",
-    title: "Possibile problema rilevato",
+    severity: "red",
+    title: "Problema probabile rilevato",
     summary: `${top.description || "Patologia non descritta"} (${scorePercent}%)`,
-    topResults: diseasesData.results.slice(0, 3).map((item) => ({
-      code: item.name || "N/D",
-      description: item.description || item.label || "Descrizione non disponibile",
-      scorePercent: Math.round((item.score || 0) * 100)
-    })),
+    topResults,
     remainingRequests: diseasesData.remainingIdentificationRequests ?? "n/d"
   };
 }
@@ -514,8 +522,37 @@ function generateCareTipsFromPlantName(scientificName, commonName) {
   };
 }
 
+function getSeverityBadge(disease) {
+  if (!disease || !disease.severity) {
+    return {
+      label: "Stato non disponibile",
+      className: "severity-green"
+    };
+  }
+
+  if (disease.severity === "red") {
+    return {
+      label: "Gravità alta",
+      className: "severity-red"
+    };
+  }
+
+  if (disease.severity === "yellow") {
+    return {
+      label: "Gravità media",
+      className: "severity-yellow"
+    };
+  }
+
+  return {
+    label: "Gravità bassa",
+    className: "severity-green"
+  };
+}
+
 function renderAnalysis(analysis) {
   const diseaseHtml = renderDiseaseSection(analysis.disease);
+  const severityBadge = getSeverityBadge(analysis.disease);
 
   setResultMessage(`
     <div class="result-card">
@@ -542,6 +579,16 @@ function renderAnalysis(analysis) {
       <div class="result-section">
         <div class="result-title">Dettagli utili</div>
         ${analysis.causes.map((item) => `• ${escapeHtml(item)}`).join("<br>")}
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Gravità del problema</div>
+        <div class="severity-wrap">
+          <div class="severity-badge ${severityBadge.className}">
+            <span class="severity-dot"></span>
+            ${escapeHtml(severityBadge.label)}
+          </div>
+        </div>
       </div>
 
       ${diseaseHtml}
@@ -603,6 +650,7 @@ function saveHistory(history) {
 
 function saveAnalysisToHistory(analysis, imageData) {
   const history = getHistory();
+  const severityBadge = getSeverityBadge(analysis.disease);
 
   history.unshift({
     id: Date.now(),
@@ -613,6 +661,7 @@ function saveAnalysisToHistory(analysis, imageData) {
     water: analysis.water,
     light: analysis.light,
     diseaseSummary: analysis.disease?.summary || "Nessuna diagnosi disponibile",
+    severityLabel: severityBadge.label,
     date: new Date().toLocaleString("it-IT")
   });
 
@@ -638,6 +687,7 @@ function renderHistory() {
               Stato: ${escapeHtml(item.health)}<br>
               Acqua: ${escapeHtml(item.water)}<br>
               Luce: ${escapeHtml(item.light)}<br>
+              Gravità: ${escapeHtml(item.severityLabel || "Non disponibile")}<br>
               Malattie: ${escapeHtml(item.diseaseSummary)}<br>
               Affidabilità specie: ${escapeHtml(String(item.confidence))}%
             </div>
