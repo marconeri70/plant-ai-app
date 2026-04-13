@@ -5,49 +5,108 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plant AI</title>
   <meta name="theme-color" content="#2e7d32" />
+  <meta name="description" content="Webapp per fotografare piante, riconoscerle e ricevere consigli di cura." />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <h1>🌿 Plant AI</h1>
-      <p>Scatta una foto e analizza la tua pianta</p>
+  <div class="app-shell">
+    <header class="hero">
+      <div class="hero-content">
+        <div class="hero-badge">🌿 AI Plant Scanner</div>
+        <h1>Fotografa la tua pianta e scopri come sta</h1>
+        <p>
+          Scatta una foto oppure caricala dal telefono per ottenere un’analisi
+          semplice, chiara e pronta da migliorare con il riconoscimento AI reale.
+        </p>
+      </div>
     </header>
 
-    <main class="container">
-      <section class="card">
-        <h2>Fotocamera</h2>
+    <main class="main-content">
+      <section class="panel panel-camera">
+        <div class="panel-header">
+          <h2>Fotocamera e caricamento</h2>
+          <p>Usa la fotocamera del telefono o carica una foto già presente nella galleria.</p>
+        </div>
 
-        <div class="camera-box">
-          <video id="video" autoplay playsinline></video>
+        <div class="camera-frame">
+          <video id="video" autoplay playsinline class="hidden"></video>
           <canvas id="canvas" class="hidden"></canvas>
           <img id="preview" class="hidden" alt="Anteprima foto pianta" />
+          <div id="cameraPlaceholder" class="camera-placeholder">
+            <div class="placeholder-icon">📷</div>
+            <div class="placeholder-text">
+              Nessuna foto acquisita.<br />
+              Apri la fotocamera oppure seleziona un’immagine.
+            </div>
+          </div>
         </div>
 
-        <div class="buttons">
-          <button id="startCameraBtn">Apri fotocamera</button>
-          <button id="takePhotoBtn" disabled>Scatta foto</button>
-          <button id="resetBtn" disabled>Nuova foto</button>
+        <div class="action-grid">
+          <button id="startCameraBtn" class="primary-btn">Apri fotocamera</button>
+          <button id="takePhotoBtn" class="secondary-btn" disabled>Scatta foto</button>
+          <button id="resetBtn" class="ghost-btn" disabled>Nuova foto</button>
         </div>
 
-        <div class="upload-area">
-          <label for="fileInput" class="upload-label">Oppure carica una foto</label>
+        <div class="upload-block">
+          <label for="fileInput" class="upload-title">Carica una foto</label>
           <input type="file" id="fileInput" accept="image/*" capture="environment" />
         </div>
       </section>
 
-      <section class="card">
-        <h2>Risultato</h2>
+      <section class="panel panel-result">
+        <div class="panel-header">
+          <h2>Analisi della pianta</h2>
+          <p>Qui comparirà il risultato dell’analisi della tua immagine.</p>
+        </div>
+
         <div id="resultBox" class="result-box">
           Nessuna immagine caricata.
+        </div>
+      </section>
+
+      <section class="panel panel-info">
+        <div class="panel-header">
+          <h2>Cosa potrà fare questa app</h2>
+        </div>
+
+        <div class="feature-list">
+          <div class="feature-card">
+            <div class="feature-icon">🌱</div>
+            <div>
+              <strong>Riconoscimento specie</strong><br />
+              Identificazione probabile della pianta fotografata.
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">🍂</div>
+            <div>
+              <strong>Controllo stato foglie</strong><br />
+              Valutazione visiva di foglie sane, secche, gialle o stressate.
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">💧</div>
+            <div>
+              <strong>Consigli di cura</strong><br />
+              Suggerimenti su acqua, luce, posizione e attenzioni utili.
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">📱</div>
+            <div>
+              <strong>Installabile sul telefono</strong><br />
+              Webapp pronta per diventare una PWA semplice da usare ovunque.
+            </div>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
-<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8"></script>
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
