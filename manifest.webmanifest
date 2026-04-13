@@ -1,15 +1,19 @@
 {
-  "name": "Plant AI",
-  "short_name": "Plant AI",
-  "start_url": "./",
+  "name": "Plant AI Scanner",
+  "short_name": "PlantAI",
+  "start_url": ".",
   "display": "standalone",
-  "background_color": "#f4f7f3",
+  "background_color": "#2e7d32",
   "theme_color": "#2e7d32",
-  "description": "Webapp per riconoscere piante, valutarne lo stato e salvare lo storico.",
   "icons": [
     {
       "src": "icon-192.png",
       "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
       "type": "image/png"
     }
   ]
