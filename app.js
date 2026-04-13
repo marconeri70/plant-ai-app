@@ -8,6 +8,8 @@ const takePhotoBtn = document.getElementById("takePhotoBtn");
 const resetBtn = document.getElementById("resetBtn");
 const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 const installBtn = document.getElementById("installBtn");
+const locationBtn = document.getElementById("locationBtn");
+const locationStatus = document.getElementById("locationStatus");
 
 const fileInput = document.getElementById("fileInput");
 const resultBox = document.getElementById("resultBox");
@@ -16,8 +18,10 @@ const historyList = document.getElementById("historyList");
 let stream = null;
 let currentImageData = null;
 let deferredPrompt = null;
+let currentLocation = null;
 
-const STORAGE_KEY = "plant_ai_history_v5";
+const STORAGE_KEY = "plant_ai_history_v6";
+const LOCATION_KEY = "plant_ai_location_v1";
 const PLANTNET_API_KEY = "2b10OfTLt1KLLHWfjIAqvR3HDe";
 
 const PLANTNET_PROJECT = "all";
@@ -33,11 +37,79 @@ function setResultMessage(html) {
 }
 
 function showPlaceholder() {
-  cameraPlaceholder.classList.remove("hidden");
+  if (cameraPlaceholder) {
+    cameraPlaceholder.classList.remove("hidden");
+  }
 }
 
 function hidePlaceholder() {
-  cameraPlaceholder.classList.add("hidden");
+  if (cameraPlaceholder) {
+    cameraPlaceholder.classList.add("hidden");
+  }
+}
+
+function setLocationStatus(text, isError = false) {
+  if (!locationStatus) return;
+  locationStatus.textContent = text;
+  locationStatus.style.color = isError ? "#b71c1c" : "";
+}
+
+function loadSavedLocation() {
+  try {
+    const raw = localStorage.getItem(LOCATION_KEY);
+    currentLocation = raw ? JSON.parse(raw) : null;
+  } catch (error) {
+    currentLocation = null;
+  }
+
+  if (currentLocation) {
+    setLocationStatus(
+      `Posizione salvata: ${currentLocation.latitude.toFixed(5)}, ${currentLocation.longitude.toFixed(5)} (±${Math.round(currentLocation.accuracy)} m)`
+    );
+  } else {
+    setLocationStatus("Posizione non impostata.");
+  }
+}
+
+function saveLocation(location) {
+  currentLocation = location;
+  localStorage.setItem(LOCATION_KEY, JSON.stringify(location));
+  setLocationStatus(
+    `Posizione attiva: ${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)} (±${Math.round(location.accuracy)} m)`
+  );
+}
+
+async function requestLocation() {
+  if (!("geolocation" in navigator)) {
+    setLocationStatus("Geolocalizzazione non supportata dal browser.", true);
+    return;
+  }
+
+  setLocationStatus("Sto cercando la tua posizione...");
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const location = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: Date.now()
+      };
+      saveLocation(location);
+    },
+    (error) => {
+      let message = "Impossibile ottenere la posizione.";
+      if (error.code === 1) message = "Permesso posizione negato.";
+      if (error.code === 2) message = "Posizione non disponibile.";
+      if (error.code === 3) message = "Tempo scaduto nella richiesta GPS.";
+      setLocationStatus(message, true);
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 300000
+    }
+  );
 }
 
 async function startCamera() {
@@ -186,7 +258,7 @@ async function analyzeCurrentImage() {
     <div class="result-card">
       <div class="result-section">
         <div class="result-title">Analisi in corso...</div>
-        Sto eseguendo riconoscimento specie, controllo malattie e verifica botanica.
+        Sto eseguendo riconoscimento specie, controllo malattie e verifica geografica.
       </div>
     </div>
   `);
@@ -203,21 +275,16 @@ async function analyzeCurrentImage() {
       throw speciesResponse.reason;
     }
 
-    const top = speciesResponse.value.results[0];
-    const scientificName =
-      top.species?.scientificNameWithoutAuthor ||
-      top.species?.scientificName ||
-      speciesResponse.value.bestMatch ||
-      "";
+    const speciesData = speciesResponse.value;
+    const diseasesData = diseasesResponse.status === "fulfilled" ? diseasesResponse.value : null;
 
-    const gbifData = scientificName
-      ? await fetchGbifTaxonomy(scientificName)
-      : null;
+    const gbifChecks = await fetchGbifChecksForCandidates(speciesData, currentLocation);
 
     const analysis = mapCombinedResponseToAnalysis(
-      speciesResponse.value,
-      diseasesResponse.status === "fulfilled" ? diseasesResponse.value : null,
-      gbifData
+      speciesData,
+      diseasesData,
+      gbifChecks,
+      currentLocation
     );
 
     renderAnalysis(analysis);
@@ -289,36 +356,153 @@ async function identifyDiseaseWithPlantNet(imageBlob) {
   return await response.json();
 }
 
+async function fetchGbifChecksForCandidates(speciesData, location) {
+  const candidates = (speciesData.results || []).slice(0, 3);
+  const checks = [];
+
+  for (const item of candidates) {
+    const scientificName =
+      item.species?.scientificNameWithoutAuthor ||
+      item.species?.scientificName ||
+      "";
+
+    if (!scientificName) continue;
+
+    const taxonomy = await fetchGbifTaxonomy(scientificName);
+    let geo = null;
+
+    if (location && taxonomy && taxonomy.usageKey) {
+      geo = await fetchGbifNearbyOccurrences(taxonomy.usageKey, location);
+    }
+
+    checks.push({
+      queryName: scientificName,
+      plantNetScore: Number(item.score || 0),
+      taxonomy,
+      geo
+    });
+  }
+
+  return checks;
+}
+
 async function fetchGbifTaxonomy(scientificName) {
   const url = `https://api.gbif.org/v1/species/match?name=${encodeURIComponent(scientificName)}`;
   const response = await fetch(url);
 
   if (!response.ok) {
-    throw new Error(`Errore GBIF (${response.status})`);
+    throw new Error(`Errore GBIF match (${response.status})`);
   }
 
-  return await response.json();
+  const data = await response.json();
+
+  if (!data || data.matchType === "NONE") {
+    return {
+      found: false,
+      scientificName,
+      summary: "Nessuna conferma trovata nel database botanico."
+    };
+  }
+
+  return {
+    found: true,
+    usageKey: data.usageKey || null,
+    scientificName: data.scientificName || scientificName,
+    canonicalName: data.canonicalName || "N/D",
+    family: data.family || "N/D",
+    genus: data.genus || "N/D",
+    status: data.status || "N/D",
+    rank: data.rank || "N/D",
+    matchType: data.matchType || "N/D",
+    confidence: data.confidence ?? 0,
+    summary: "Specie verificata con database botanico."
+  };
 }
 
-function mapCombinedResponseToAnalysis(speciesData, diseasesData, gbifData) {
-  const top = speciesData.results[0];
-  const species = top.species || {};
+async function fetchGbifNearbyOccurrences(usageKey, location) {
+  const radiusKm = getRadiusKmFromAccuracy(location.accuracy);
+  const geometry = createWktCircle(location.latitude, location.longitude, radiusKm);
 
-  const scientificName =
-    species.scientificNameWithoutAuthor ||
-    species.scientificName ||
-    speciesData.bestMatch ||
-    "Specie non determinata";
+  const url =
+    `https://api.gbif.org/v1/occurrence/search?taxon_key=${encodeURIComponent(usageKey)}` +
+    `&limit=20` +
+    `&has_coordinate=true` +
+    `&geometry=${encodeURIComponent(geometry)}`;
 
-  const commonNames = Array.isArray(species.commonNames) ? species.commonNames : [];
-  const commonName = commonNames.length ? commonNames[0] : "Nome comune non disponibile";
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      return {
+        checked: false,
+        nearbyCount: 0,
+        radiusKm,
+        summary: "Verifica geografica non disponibile."
+      };
+    }
 
-  const family = species.family?.scientificNameWithoutAuthor || species.family?.scientificName || "Famiglia non disponibile";
-  const genus = species.genus?.scientificNameWithoutAuthor || species.genus?.scientificName || "Genere non disponibile";
-  const confidence = Math.round((top.score || 0) * 100);
+    const data = await response.json();
+    const count = Number(data.count || 0);
+
+    return {
+      checked: true,
+      nearbyCount: count,
+      radiusKm,
+      summary:
+        count > 0
+          ? `Trovate ${count} occorrenze GBIF nell'area vicina.`
+          : "Nessuna occorrenza GBIF trovata nell'area vicina."
+    };
+  } catch (error) {
+    return {
+      checked: false,
+      nearbyCount: 0,
+      radiusKm,
+      summary: "Errore nella verifica geografica."
+    };
+  }
+}
+
+function getRadiusKmFromAccuracy(accuracyMeters) {
+  if (!accuracyMeters || Number.isNaN(accuracyMeters)) return 50;
+  const km = Math.max(10, Math.min(100, Math.ceil(accuracyMeters / 1000) * 5));
+  return km;
+}
+
+function createWktCircle(lat, lon, radiusKm) {
+  const points = [];
+  const earthRadiusKm = 6371;
+  const steps = 24;
+
+  for (let i = 0; i <= steps; i++) {
+    const angle = (i / steps) * 2 * Math.PI;
+    const dLat = (radiusKm / earthRadiusKm) * (180 / Math.PI) * Math.sin(angle);
+    const dLon =
+      ((radiusKm / earthRadiusKm) * (180 / Math.PI) * Math.cos(angle)) /
+      Math.cos((lat * Math.PI) / 180);
+
+    const pointLat = lat + dLat;
+    const pointLon = lon + dLon;
+
+    points.push(`${pointLon} ${pointLat}`);
+  }
+
+  return `POLYGON((${points.join(", ")}))`;
+}
+
+function mapCombinedResponseToAnalysis(speciesData, diseasesData, gbifChecks, location) {
+  const rankedCandidates = rankCandidates(speciesData, gbifChecks, location);
+  const bestCandidate = rankedCandidates[0];
+
+  const scientificName = bestCandidate?.name || "Specie non determinata";
+  const commonName = bestCandidate?.commonName || "Nome comune non disponibile";
+  const family = bestCandidate?.family || "Famiglia non disponibile";
+  const genus = bestCandidate?.genus || "Genere non disponibile";
+
+  const confidence = Math.round((bestCandidate?.plantNetScore || 0) * 100);
+  const finalScore = Math.round((bestCandidate?.finalScore || 0) * 100);
+  const geoScore = Math.round((bestCandidate?.geoScore || 0) * 100);
 
   const disease = parseDiseaseInfo(diseasesData);
-  const gbif = parseGbifInfo(gbifData);
   const care = generateCareTipsFromPlantName(scientificName, commonName);
 
   return {
@@ -327,39 +511,101 @@ function mapCombinedResponseToAnalysis(speciesData, diseasesData, gbifData) {
     family,
     genus,
     confidence,
-    health: confidence >= 85
-      ? "Riconoscimento specie molto affidabile."
-      : confidence >= 65
-      ? "Riconoscimento specie abbastanza affidabile."
-      : "Riconoscimento specie incerto.",
+    finalScore,
+    geoScore,
+    health:
+      finalScore >= 85
+        ? "Risultato finale molto affidabile."
+        : finalScore >= 65
+        ? "Risultato finale abbastanza affidabile."
+        : "Risultato finale ancora incerto.",
     water: care.water,
     light: care.light,
     care: care.tips,
     disease,
-    gbif
+    location,
+    gbif: {
+      found: !!bestCandidate?.taxonomy?.found,
+      summary: bestCandidate?.taxonomy?.summary || "Nessuna verifica botanica disponibile.",
+      scientificName: bestCandidate?.taxonomy?.scientificName || scientificName,
+      canonicalName: bestCandidate?.taxonomy?.canonicalName || "N/D",
+      family: bestCandidate?.taxonomy?.family || family,
+      genus: bestCandidate?.taxonomy?.genus || genus,
+      status: bestCandidate?.taxonomy?.status || "N/D",
+      rank: bestCandidate?.taxonomy?.rank || "N/D",
+      matchType: bestCandidate?.taxonomy?.matchType || "N/D",
+      confidence: bestCandidate?.taxonomy?.confidence ?? 0
+    },
+    geography: {
+      enabled: !!location,
+      summary:
+        bestCandidate?.geo?.summary ||
+        (location ? "Verifica geografica eseguita." : "Posizione non usata."),
+      nearbyCount: bestCandidate?.geo?.nearbyCount ?? 0,
+      radiusKm: bestCandidate?.geo?.radiusKm ?? null
+    },
+    alternatives: rankedCandidates.slice(1, 3).map((item) => ({
+      name: item.name,
+      finalScore: Math.round((item.finalScore || 0) * 100)
+    }))
   };
 }
 
-function parseGbifInfo(gbifData) {
-  if (!gbifData || gbifData.matchType === "NONE") {
-    return {
-      found: false,
-      summary: "Nessuna conferma trovata nel database botanico."
-    };
-  }
+function rankCandidates(speciesData, gbifChecks, location) {
+  const results = (speciesData.results || []).slice(0, 3);
 
-  return {
-    found: true,
-    summary: "Specie verificata con database botanico.",
-    scientificName: gbifData.scientificName || "N/D",
-    canonicalName: gbifData.canonicalName || "N/D",
-    family: gbifData.family || "N/D",
-    genus: gbifData.genus || "N/D",
-    status: gbifData.status || "N/D",
-    rank: gbifData.rank || "N/D",
-    matchType: gbifData.matchType || "N/D",
-    confidence: gbifData.confidence ?? "N/D"
-  };
+  return results
+    .map((item) => {
+      const name =
+        item.species?.scientificNameWithoutAuthor ||
+        item.species?.scientificName ||
+        "Specie alternativa";
+
+      const commonNames = Array.isArray(item.species?.commonNames) ? item.species.commonNames : [];
+      const commonName = commonNames.length ? commonNames[0] : "Nome comune non disponibile";
+
+      const plantNetScore = Number(item.score || 0);
+      const check = gbifChecks.find((c) => c.queryName === name);
+
+      const taxonomyConfidence = check?.taxonomy?.found
+        ? Math.min((Number(check.taxonomy.confidence || 0) / 100), 1)
+        : 0;
+
+      let geoScore = 0;
+      if (location && check?.geo?.checked) {
+        if (check.geo.nearbyCount >= 20) geoScore = 1;
+        else if (check.geo.nearbyCount >= 10) geoScore = 0.8;
+        else if (check.geo.nearbyCount >= 5) geoScore = 0.6;
+        else if (check.geo.nearbyCount >= 1) geoScore = 0.4;
+        else geoScore = 0.1;
+      }
+
+      const finalScore = location
+        ? (plantNetScore * 0.6) + (taxonomyConfidence * 0.15) + (geoScore * 0.25)
+        : (plantNetScore * 0.85) + (taxonomyConfidence * 0.15);
+
+      return {
+        name,
+        commonName,
+        family:
+          item.species?.family?.scientificNameWithoutAuthor ||
+          item.species?.family?.scientificName ||
+          check?.taxonomy?.family ||
+          "Famiglia non disponibile",
+        genus:
+          item.species?.genus?.scientificNameWithoutAuthor ||
+          item.species?.genus?.scientificName ||
+          check?.taxonomy?.genus ||
+          "Genere non disponibile",
+        plantNetScore,
+        taxonomyConfidence,
+        geoScore,
+        finalScore,
+        taxonomy: check?.taxonomy || null,
+        geo: check?.geo || null
+      };
+    })
+    .sort((a, b) => b.finalScore - a.finalScore);
 }
 
 function parseDiseaseInfo(diseasesData) {
@@ -425,6 +671,18 @@ function generateCareTipsFromPlantName(scientificName, commonName) {
     };
   }
 
+  if (name.includes("pothos") || name.includes("epipremnum")) {
+    return {
+      water: "Medio",
+      light: "Indiretta moderata",
+      tips: [
+        "mantieni il terreno leggermente umido ma non fradicio",
+        "evita correnti d'aria fredde",
+        "taglia le foglie molto rovinate"
+      ]
+    };
+  }
+
   return {
     water: "Da valutare",
     light: "Luminosa senza eccessi",
@@ -449,13 +707,28 @@ function getSeverityBadge(disease) {
 function renderAnalysis(analysis) {
   const severityBadge = getSeverityBadge(analysis.disease);
 
+  const alternativesHtml = analysis.alternatives && analysis.alternatives.length
+    ? analysis.alternatives
+        .map((item) => `• ${escapeHtml(item.name)} — punteggio finale ${escapeHtml(String(item.finalScore))}%`)
+        .join("<br>")
+    : "Nessuna alternativa forte disponibile.";
+
+  const locationHtml = analysis.location
+    ? `
+      <strong>Posizione usata:</strong> ${escapeHtml(analysis.location.latitude.toFixed(5))}, ${escapeHtml(analysis.location.longitude.toFixed(5))}<br>
+      <strong>Accuratezza GPS:</strong> ±${escapeHtml(String(Math.round(analysis.location.accuracy)))} m<br>
+      <strong>Verifica geografica:</strong> ${escapeHtml(analysis.geography.summary)}<br>
+      <strong>Occorrenze vicine GBIF:</strong> ${escapeHtml(String(analysis.geography.nearbyCount))}${analysis.geography.radiusKm ? ` entro circa ${escapeHtml(String(analysis.geography.radiusKm))} km` : ""}
+    `
+    : "Posizione non usata. Puoi migliorare l’affidabilità attivando il pulsante posizione.";
+
   setResultMessage(`
     <div class="result-card">
       <div class="result-top">
         <div class="result-chip">🌿 ${escapeHtml(analysis.plant)}</div>
-        <div class="result-chip">📊 Affidabilità specie: ${analysis.confidence}%</div>
-        <div class="result-chip">💧 Acqua: ${escapeHtml(analysis.water)}</div>
-        <div class="result-chip">☀️ Luce: ${escapeHtml(analysis.light)}</div>
+        <div class="result-chip">📊 Foto: ${escapeHtml(String(analysis.confidence))}%</div>
+        <div class="result-chip">🧭 Geo score: ${escapeHtml(String(analysis.geoScore))}%</div>
+        <div class="result-chip">⭐ Punteggio finale: ${escapeHtml(String(analysis.finalScore))}%</div>
       </div>
 
       <div class="result-section">
@@ -463,7 +736,8 @@ function renderAnalysis(analysis) {
         <strong>Nome scientifico:</strong> ${escapeHtml(analysis.plant)}<br>
         <strong>Nome comune:</strong> ${escapeHtml(analysis.commonName)}<br>
         <strong>Genere:</strong> ${escapeHtml(analysis.genus)}<br>
-        <strong>Famiglia:</strong> ${escapeHtml(analysis.family)}
+        <strong>Famiglia:</strong> ${escapeHtml(analysis.family)}<br>
+        <strong>Valutazione finale:</strong> ${escapeHtml(analysis.health)}
       </div>
 
       <div class="result-section">
@@ -472,13 +746,21 @@ function renderAnalysis(analysis) {
           <strong>Esito:</strong> ${escapeHtml(analysis.gbif.summary)}<br>
           <strong>Nome accettato:</strong> ${escapeHtml(analysis.gbif.scientificName)}<br>
           <strong>Canonical name:</strong> ${escapeHtml(analysis.gbif.canonicalName)}<br>
-          <strong>Famiglia:</strong> ${escapeHtml(analysis.gbif.family)}<br>
-          <strong>Genere:</strong> ${escapeHtml(analysis.gbif.genus)}<br>
           <strong>Status:</strong> ${escapeHtml(analysis.gbif.status)}<br>
           <strong>Rank:</strong> ${escapeHtml(analysis.gbif.rank)}<br>
           <strong>Match type:</strong> ${escapeHtml(analysis.gbif.matchType)}<br>
           <strong>Confidence GBIF:</strong> ${escapeHtml(String(analysis.gbif.confidence))}
         ` : escapeHtml(analysis.gbif.summary)}
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Controllo geografico</div>
+        ${locationHtml}
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Alternative considerate</div>
+        ${alternativesHtml}
       </div>
 
       <div class="result-section">
@@ -524,9 +806,12 @@ function saveAnalysisToHistory(analysis, imageData) {
     imageData,
     plant: analysis.plant,
     confidence: analysis.confidence,
+    finalScore: analysis.finalScore,
+    geoScore: analysis.geoScore,
     diseaseSummary: analysis.disease.summary,
     severityLabel: severityBadge.label,
     gbifSummary: analysis.gbif.summary,
+    geographySummary: analysis.geography.summary,
     date: new Date().toLocaleString("it-IT")
   });
 
@@ -547,10 +832,13 @@ function renderHistory() {
       <div class="history-body">
         <div class="history-name">${escapeHtml(item.plant)}</div>
         <div class="history-meta">
-          Affidabilità specie: ${escapeHtml(String(item.confidence))}%<br>
+          Affidabilità foto: ${escapeHtml(String(item.confidence))}%<br>
+          Geo score: ${escapeHtml(String(item.geoScore))}%<br>
+          Punteggio finale: ${escapeHtml(String(item.finalScore))}%<br>
           Gravità: ${escapeHtml(item.severityLabel)}<br>
           Malattie: ${escapeHtml(item.diseaseSummary)}<br>
-          Database: ${escapeHtml(item.gbifSummary)}
+          Database: ${escapeHtml(item.gbifSummary)}<br>
+          Geografia: ${escapeHtml(item.geographySummary)}
         </div>
         <div class="history-date">${escapeHtml(item.date)}</div>
       </div>
@@ -591,25 +879,37 @@ function escapeHtml(value) {
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredPrompt = event;
-  installBtn.classList.remove("hidden");
+  if (installBtn) {
+    installBtn.classList.remove("hidden");
+  }
 });
 
-installBtn.addEventListener("click", async () => {
-  if (!deferredPrompt) return;
-  deferredPrompt.prompt();
-  await deferredPrompt.userChoice;
-  deferredPrompt = null;
-  installBtn.classList.add("hidden");
-});
+if (installBtn) {
+  installBtn.addEventListener("click", async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    installBtn.classList.add("hidden");
+  });
+}
 
-clearHistoryBtn.addEventListener("click", clearHistory);
+if (locationBtn) {
+  locationBtn.addEventListener("click", requestLocation);
+}
+
+if (clearHistoryBtn) {
+  clearHistoryBtn.addEventListener("click", clearHistory);
+}
+
 window.addEventListener("beforeunload", stopCamera);
 
-startCameraBtn.addEventListener("click", startCamera);
-takePhotoBtn.addEventListener("click", takePhoto);
-resetBtn.addEventListener("click", resetPhoto);
-fileInput.addEventListener("change", handleFileUpload);
+if (startCameraBtn) startCameraBtn.addEventListener("click", startCamera);
+if (takePhotoBtn) takePhotoBtn.addEventListener("click", takePhoto);
+if (resetBtn) resetBtn.addEventListener("click", resetPhoto);
+if (fileInput) fileInput.addEventListener("change", handleFileUpload);
 
+loadSavedLocation();
 renderHistory();
 setResultMessage("Nessuna immagine caricata.");
 showPlaceholder();
