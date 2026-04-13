@@ -17,7 +17,19 @@ let stream = null;
 let currentImageData = null;
 let deferredPrompt = null;
 
-const STORAGE_KEY = "plant_ai_history_v1";
+const STORAGE_KEY = "plant_ai_history_v2";
+
+// INSERISCI QUI LA TUA API KEY PL@NTNET
+const PLANTNET_API_KEY = "2b10OfTLt1KLLHWfjIAqvR3HDe";
+
+// Progetto: "all" è il più semplice per iniziare
+const PLANTNET_PROJECT = "all";
+
+// Organo: auto = lascia decidere all'AI
+const PLANTNET_ORGAN = "auto";
+
+// Numero risultati
+const PLANTNET_NB_RESULTS = 3;
 
 function setResultMessage(html) {
   resultBox.innerHTML = html;
@@ -35,8 +47,12 @@ async function startCamera() {
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setResultMessage(`
-        <strong>Fotocamera non supportata.</strong><br>
-        Questo browser non supporta l'apertura della fotocamera.
+        <div class="result-card">
+          <div class="result-section">
+            <div class="result-title">Fotocamera non supportata</div>
+            Questo browser non supporta l'apertura della fotocamera.
+          </div>
+        </div>
       `);
       return;
     }
@@ -64,7 +80,7 @@ async function startCamera() {
       <div class="result-card">
         <div class="result-section">
           <div class="result-title">Fotocamera attiva</div>
-          Inquadra bene la pianta, meglio se si vedono foglie e parte centrale.
+          Inquadra bene foglie e pianta, poi premi <b>Scatta foto</b>.
         </div>
       </div>
     `);
@@ -74,7 +90,7 @@ async function startCamera() {
       <div class="result-card">
         <div class="result-section">
           <div class="result-title">Impossibile aprire la fotocamera</div>
-          Controlla i permessi del browser oppure usa il caricamento manuale della foto.
+          Controlla i permessi del browser oppure usa il caricamento manuale.
         </div>
       </div>
     `);
@@ -201,136 +217,261 @@ function handleFileUpload(event) {
   reader.readAsDataURL(file);
 }
 
-function analyzeCurrentImage() {
+async function analyzeCurrentImage() {
   if (!currentImageData) {
     setResultMessage("Nessuna immagine caricata.");
+    return;
+  }
+
+  if (!PLANTNET_API_KEY || PLANTNET_API_KEY === "INSERISCI_LA_TUA_API_KEY") {
+    setResultMessage(`
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">API key mancante</div>
+          Inserisci la tua chiave API di Pl@ntNet nel file <b>app.js</b> per attivare il riconoscimento reale.
+        </div>
+      </div>
+    `);
     return;
   }
 
   setResultMessage(`
     <div class="result-card">
       <div class="result-section">
-        <div class="result-title">Analisi in corso...</div>
-        Sto valutando aspetto generale, stato foglie e primi consigli.
+        <div class="result-title">Analisi reale in corso...</div>
+        Sto inviando la foto al motore di riconoscimento della pianta.
       </div>
     </div>
   `);
 
-  setTimeout(() => {
-    const analysis = generateDemoAnalysis();
+  try {
+    const blob = dataURLToBlob(currentImageData);
+    const response = await identifyPlantWithPlantNet(blob);
+    const analysis = mapPlantNetResponseToAnalysis(response);
+
     renderAnalysis(analysis);
     saveAnalysisToHistory(analysis, currentImageData);
     renderHistory();
-  }, 1100);
+  } catch (error) {
+    console.error("Errore riconoscimento:", error);
+
+    setResultMessage(`
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Errore durante il riconoscimento</div>
+          ${escapeHtml(error.message || "Non sono riuscito a completare l'analisi.")}
+        </div>
+      </div>
+    `);
+  }
+}
+
+async function identifyPlantWithPlantNet(imageBlob) {
+  const url =
+    `https://my-api.plantnet.org/v2/identify/${encodeURIComponent(PLANTNET_PROJECT)}` +
+    `?api-key=${encodeURIComponent(PLANTNET_API_KEY)}` +
+    `&nb-results=${encodeURIComponent(PLANTNET_NB_RESULTS)}` +
+    `&lang=it` +
+    `&include-related-images=true`;
+
+  const formData = new FormData();
+  formData.append("images", imageBlob, "plant.jpg");
+  formData.append("organs", PLANTNET_ORGAN);
+
+  const response = await fetch(url, {
+    method: "POST",
+    body: formData
+  });
+
+  if (!response.ok) {
+    let extra = "";
+    try {
+      extra = await response.text();
+    } catch (_) {}
+
+    if (response.status === 404) {
+      throw new Error("Endpoint non trovato. Controlla progetto o URL API.");
+    }
+    if (response.status === 429) {
+      throw new Error("Limite richieste raggiunto per oggi.");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("API key non valida o non autorizzata.");
+    }
+
+    throw new Error(`Errore API (${response.status}). ${extra}`);
+  }
+
+  const data = await response.json();
+
+  if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
+    throw new Error("Nessun risultato trovato. Prova con una foto più nitida della pianta.");
+  }
+
+  return data;
+}
+
+function mapPlantNetResponseToAnalysis(data) {
+  const top = data.results[0];
+  const species = top.species || {};
+
+  const scientificName =
+    species.scientificNameWithoutAuthor ||
+    species.scientificName ||
+    data.bestMatch ||
+    "Specie non determinata";
+
+  const commonNames = Array.isArray(species.commonNames) ? species.commonNames : [];
+  const commonName = commonNames.length ? commonNames[0] : "Nome comune non disponibile";
+
+  const family = species.family?.scientificNameWithoutAuthor || species.family?.scientificName || "Famiglia non disponibile";
+  const genus = species.genus?.scientificNameWithoutAuthor || species.genus?.scientificName || "Genere non disponibile";
+
+  const confidence = Math.round((top.score || 0) * 100);
+  const predictedOrgan = data.predictedOrgans?.[0]?.organ || "auto";
+  const remaining = data.remainingIdentificationRequests ?? "n/d";
+
+  const care = generateCareTipsFromPlantName(scientificName, commonName);
+  const health = generateVisualStatusMessage(confidence);
+
+  const alternatives = data.results.slice(1, 3).map((item) => {
+    const altName =
+      item.species?.scientificNameWithoutAuthor ||
+      item.species?.scientificName ||
+      "Specie alternativa";
+    return `${altName} (${Math.round((item.score || 0) * 100)}%)`;
+  });
+
+  return {
+    plant: scientificName,
+    commonName,
+    family,
+    genus,
+    confidence,
+    health,
+    water: care.water,
+    light: care.light,
+    causes: [
+      `organo rilevato: ${predictedOrgan}`,
+      `famiglia botanica: ${family}`,
+      alternatives.length ? `alternative probabili: ${alternatives.join(", ")}` : "nessuna alternativa forte disponibile"
+    ],
+    care: care.tips,
+    remainingRequests: remaining
+  };
+}
+
+function generateVisualStatusMessage(confidence) {
+  if (confidence >= 85) {
+    return "Riconoscimento molto affidabile. Per lo stato di salute visivo servono ulteriori controlli specifici.";
+  }
+  if (confidence >= 65) {
+    return "Riconoscimento abbastanza affidabile. Conviene fare anche una seconda foto più ravvicinata delle foglie.";
+  }
+  return "Riconoscimento incerto. Prova con una foto più nitida, sfondo semplice e foglie ben visibili.";
+}
+
+function generateCareTipsFromPlantName(scientificName, commonName) {
+  const name = `${scientificName} ${commonName}`.toLowerCase();
+
+  if (name.includes("monstera")) {
+    return {
+      water: "Medio",
+      light: "Intensa indiretta",
+      tips: [
+        "innaffia quando il terriccio è asciutto nei primi centimetri",
+        "evita sole diretto forte sulle foglie",
+        "aumenta leggermente l'umidità ambientale"
+      ]
+    };
+  }
+
+  if (name.includes("pothos") || name.includes("epipremnum")) {
+    return {
+      water: "Medio",
+      light: "Indiretta moderata",
+      tips: [
+        "mantieni il terreno leggermente umido ma non fradicio",
+        "taglia le foglie molto rovinate",
+        "tieni la pianta lontana da aria fredda e correnti"
+      ]
+    };
+  }
+
+  if (name.includes("sansevieria") || name.includes("dracaena trifasciata")) {
+    return {
+      water: "Basso",
+      light: "Da media a intensa",
+      tips: [
+        "lascia asciugare bene il terriccio tra un'annaffiatura e l'altra",
+        "usa un vaso con buon drenaggio",
+        "evita eccessi d'acqua"
+      ]
+    };
+  }
+
+  if (name.includes("ficus")) {
+    return {
+      water: "Medio",
+      light: "Intensa indiretta",
+      tips: [
+        "mantieni una posizione stabile e luminosa",
+        "pulisci le foglie dalla polvere",
+        "innaffia con regolarità senza ristagni"
+      ]
+    };
+  }
+
+  return {
+    water: "Da valutare",
+    light: "Luminosa senza eccessi",
+    tips: [
+      "controlla che il terreno non resti sempre bagnato",
+      "verifica la luce disponibile nell'ambiente",
+      "osserva foglie e fusto nei prossimi giorni per eventuali segnali di stress"
+    ]
+  };
 }
 
 function renderAnalysis(analysis) {
   setResultMessage(`
     <div class="result-card">
       <div class="result-top">
-        <div class="result-chip">🌿 ${analysis.plant}</div>
+        <div class="result-chip">🌿 ${escapeHtml(analysis.plant)}</div>
         <div class="result-chip">📊 Affidabilità: ${analysis.confidence}%</div>
-        <div class="result-chip">💧 Acqua: ${analysis.water}</div>
-        <div class="result-chip">☀️ Luce: ${analysis.light}</div>
+        <div class="result-chip">💧 Acqua: ${escapeHtml(analysis.water)}</div>
+        <div class="result-chip">☀️ Luce: ${escapeHtml(analysis.light)}</div>
       </div>
 
       <div class="result-section">
-        <div class="result-title">Stato visivo</div>
-        ${analysis.health}
+        <div class="result-title">Specie riconosciuta</div>
+        <strong>Nome scientifico:</strong> ${escapeHtml(analysis.plant)}<br>
+        <strong>Nome comune:</strong> ${escapeHtml(analysis.commonName)}<br>
+        <strong>Genere:</strong> ${escapeHtml(analysis.genus)}<br>
+        <strong>Famiglia:</strong> ${escapeHtml(analysis.family)}
       </div>
 
       <div class="result-section">
-        <div class="result-title">Possibili cause</div>
-        ${analysis.causes.map((item) => `• ${item}`).join("<br>")}
+        <div class="result-title">Valutazione</div>
+        ${escapeHtml(analysis.health)}
       </div>
 
       <div class="result-section">
-        <div class="result-title">Cure consigliate</div>
-        ${analysis.care.map((item) => `• ${item}`).join("<br>")}
+        <div class="result-title">Dettagli utili</div>
+        ${analysis.causes.map((item) => `• ${escapeHtml(item)}`).join("<br>")}
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Consigli base di cura</div>
+        ${analysis.care.map((item) => `• ${escapeHtml(item)}`).join("<br>")}
       </div>
 
       <div class="note-box">
-        <strong>Nota</strong><br>
-        Questa è una prima analisi dimostrativa. Nel prossimo step collegheremo il riconoscimento reale della pianta.
+        <strong>Richieste rimanenti oggi:</strong> ${escapeHtml(String(analysis.remainingRequests))}<br>
+        Il riconoscimento specie è reale. La diagnosi completa delle malattie la collegheremo in un secondo step.
       </div>
     </div>
   `);
-}
-
-function generateDemoAnalysis() {
-  const demoResults = [
-    {
-      plant: "Monstera Deliciosa",
-      confidence: 91,
-      health: "Buona, con lieve stress sulle foglie.",
-      water: "Medio",
-      light: "Intensa indiretta",
-      causes: [
-        "leggera carenza di umidità",
-        "irrigazione non perfettamente regolare",
-        "esposizione a luce diretta in alcune ore"
-      ],
-      care: [
-        "innaffia solo quando il terreno è asciutto nei primi centimetri",
-        "evita sole diretto forte",
-        "pulisci le foglie e aumenta leggermente l'umidità"
-      ]
-    },
-    {
-      plant: "Pothos",
-      confidence: 87,
-      health: "Discreto, con alcuni segnali di affaticamento.",
-      water: "Medio-alto",
-      light: "Indiretta moderata",
-      causes: [
-        "terreno troppo asciutto",
-        "aria secca",
-        "foglie esposte a sbalzi termici"
-      ],
-      care: [
-        "controlla il terreno più spesso",
-        "rimuovi le foglie molto rovinate",
-        "mantieni la pianta in ambiente luminoso ma non al sole diretto"
-      ]
-    },
-    {
-      plant: "Sansevieria",
-      confidence: 89,
-      health: "Buono, ma con possibile stress da eccesso d'acqua.",
-      water: "Basso",
-      light: "Mezz'ombra luminosa",
-      causes: [
-        "troppa acqua rispetto al fabbisogno",
-        "drenaggio insufficiente",
-        "vaso poco arieggiato"
-      ],
-      care: [
-        "riduci la frequenza delle annaffiature",
-        "verifica che il vaso scarichi bene",
-        "lascia asciugare meglio il terriccio tra un'irrigazione e l'altra"
-      ]
-    },
-    {
-      plant: "Ficus elastica",
-      confidence: 85,
-      health: "Leggero ingiallimento fogliare.",
-      water: "Medio",
-      light: "Intensa indiretta",
-      causes: [
-        "stress da posizione",
-        "irrigazione irregolare",
-        "accumulo di polvere sulle foglie"
-      ],
-      care: [
-        "mantieni una posizione stabile",
-        "bagna con regolarità senza eccedere",
-        "pulisci delicatamente le foglie"
-      ]
-    }
-  ];
-
-  const index = Math.floor(Math.random() * demoResults.length);
-  return demoResults[index];
 }
 
 function getHistory() {
@@ -361,8 +502,7 @@ function saveAnalysisToHistory(analysis, imageData) {
     date: new Date().toLocaleString("it-IT")
   });
 
-  const trimmed = history.slice(0, 10);
-  saveHistory(trimmed);
+  saveHistory(history.slice(0, 10));
 }
 
 function renderHistory() {
@@ -377,16 +517,16 @@ function renderHistory() {
     .map(
       (item) => `
         <div class="history-item">
-          <img src="${item.imageData}" alt="${item.plant}" class="history-thumb" />
+          <img src="${item.imageData}" alt="${escapeHtml(item.plant)}" class="history-thumb" />
           <div class="history-body">
-            <div class="history-name">${item.plant}</div>
+            <div class="history-name">${escapeHtml(item.plant)}</div>
             <div class="history-meta">
-              Stato: ${item.health}<br>
-              Acqua: ${item.water}<br>
-              Luce: ${item.light}<br>
-              Affidabilità: ${item.confidence}%
+              Stato: ${escapeHtml(item.health)}<br>
+              Acqua: ${escapeHtml(item.water)}<br>
+              Luce: ${escapeHtml(item.light)}<br>
+              Affidabilità: ${escapeHtml(String(item.confidence))}%
             </div>
-            <div class="history-date">${item.date}</div>
+            <div class="history-date">${escapeHtml(item.date)}</div>
           </div>
         </div>
       `
@@ -397,6 +537,31 @@ function renderHistory() {
 function clearHistory() {
   localStorage.removeItem(STORAGE_KEY);
   renderHistory();
+}
+
+function dataURLToBlob(dataURL) {
+  const [header, base64] = dataURL.split(",");
+  const mimeMatch = header.match(/data:(.*?);base64/);
+  const mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
+
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return new Blob([bytes], { type: mime });
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 window.addEventListener("beforeinstallprompt", (event) => {
