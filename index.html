@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plant AI</title>
+  <meta name="theme-color" content="#2e7d32" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1>🌿 Plant AI</h1>
+      <p>Scatta una foto e analizza la tua pianta</p>
+    </header>
+
+    <main class="container">
+      <section class="card">
+        <h2>Fotocamera</h2>
+
+        <div class="camera-box">
+          <video id="video" autoplay playsinline></video>
+          <canvas id="canvas" class="hidden"></canvas>
+          <img id="preview" class="hidden" alt="Anteprima foto pianta" />
+        </div>
+
+        <div class="buttons">
+          <button id="startCameraBtn">Apri fotocamera</button>
+          <button id="takePhotoBtn" disabled>Scatta foto</button>
+          <button id="resetBtn" disabled>Nuova foto</button>
+        </div>
+
+        <div class="upload-area">
+          <label for="fileInput" class="upload-label">Oppure carica una foto</label>
+          <input type="file" id="fileInput" accept="image/*" capture="environment" />
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Risultato</h2>
+        <div id="resultBox" class="result-box">
+          Nessuna immagine caricata.
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
