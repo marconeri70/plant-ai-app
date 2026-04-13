@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Plant AI</title>
   <meta name="theme-color" content="#2e7d32" />
-  <meta name="description" content="Webapp per fotografare piante, valutarne lo stato e salvare lo storico delle analisi." />
+  <meta
+    name="description"
+    content="Webapp per fotografare piante, riconoscerle, verificarle con database botanico e valutarne lo stato."
+  />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -19,7 +22,8 @@
             <h1>Fotografa la tua pianta e scopri come sta</h1>
             <p>
               Scatta una foto oppure caricala dal telefono per ottenere
-              un’analisi della pianta e salvare lo storico delle verifiche.
+              riconoscimento specie, verifica botanica, controllo geografico
+              e analisi del possibile stato della pianta.
             </p>
           </div>
 
@@ -34,7 +38,10 @@
       <section class="panel panel-camera">
         <div class="panel-header">
           <h2>Fotocamera e caricamento</h2>
-          <p>Usa la fotocamera del telefono o carica una foto dalla galleria.</p>
+          <p>
+            Usa la fotocamera del telefono o carica una foto dalla galleria.
+            Puoi anche attivare la posizione per aumentare l’affidabilità del risultato.
+          </p>
         </div>
 
         <div class="camera-frame">
@@ -54,6 +61,11 @@
           <button id="startCameraBtn" class="primary-btn">Apri fotocamera</button>
           <button id="takePhotoBtn" class="secondary-btn" disabled>Scatta foto</button>
           <button id="resetBtn" class="ghost-btn" disabled>Nuova foto</button>
+          <button id="locationBtn" class="ghost-btn">Usa posizione</button>
+        </div>
+
+        <div id="locationStatus" class="location-status">
+          Posizione non impostata.
         </div>
 
         <div class="upload-block">
@@ -65,7 +77,10 @@
       <section class="panel panel-result">
         <div class="panel-header">
           <h2>Analisi della pianta</h2>
-          <p>Qui comparirà il risultato dell’analisi della tua immagine.</p>
+          <p>
+            Qui comparirà il risultato del riconoscimento della specie,
+            della verifica botanica, del controllo geografico e della diagnosi visiva.
+          </p>
         </div>
 
         <div id="resultBox" class="result-box">
@@ -83,15 +98,31 @@
             <div class="feature-icon">🌱</div>
             <div>
               <strong>Riconoscimento specie</strong><br />
-              Identificazione probabile della pianta fotografata.
+              Identificazione probabile della pianta fotografata tramite AI.
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">🧬</div>
+            <div>
+              <strong>Verifica botanica</strong><br />
+              Controllo del risultato con database tassonomico esterno.
+            </div>
+          </div>
+
+          <div class="feature-card">
+            <div class="feature-icon">📍</div>
+            <div>
+              <strong>Controllo geografico</strong><br />
+              Uso della posizione per rafforzare la plausibilità della specie nella tua zona.
             </div>
           </div>
 
           <div class="feature-card">
             <div class="feature-icon">🍂</div>
             <div>
-              <strong>Controllo stato foglie</strong><br />
-              Valutazione visiva di foglie sane, secche, gialle o stressate.
+              <strong>Valutazione stato pianta</strong><br />
+              Analisi di possibili segnali di stress o problemi sulle foglie.
             </div>
           </div>
 
@@ -99,7 +130,7 @@
             <div class="feature-icon">💧</div>
             <div>
               <strong>Consigli di cura</strong><br />
-              Suggerimenti su acqua, luce, posizione e attenzioni utili.
+              Suggerimenti base su acqua, luce e attenzioni generali.
             </div>
           </div>
 
@@ -107,7 +138,7 @@
             <div class="feature-icon">📱</div>
             <div>
               <strong>Installabile sul telefono</strong><br />
-              Webapp pronta per diventare una PWA da usare ovunque.
+              Webapp pronta per diventare una PWA da usare come app.
             </div>
           </div>
         </div>
