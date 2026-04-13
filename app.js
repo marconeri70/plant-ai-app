@@ -17,19 +17,19 @@ let stream = null;
 let currentImageData = null;
 let deferredPrompt = null;
 
-const STORAGE_KEY = "plant_ai_history_v2";
+const STORAGE_KEY = "plant_ai_history_v3";
 
-// INSERISCI QUI LA TUA API KEY PL@NTNET
-const PLANTNET_API_KEY = "2b10OfTLt1KLLHWfjIAqvR3HDe";
+// Inserisci qui la tua API key Pl@ntNet
+const PLANTNET_API_KEY = "INSERISCI_LA_TUA_API_KEY";
 
-// Progetto: "all" è il più semplice per iniziare
+// Riconoscimento specie
 const PLANTNET_PROJECT = "all";
-
-// Organo: auto = lascia decidere all'AI
 const PLANTNET_ORGAN = "auto";
-
-// Numero risultati
 const PLANTNET_NB_RESULTS = 3;
+
+// Diagnosi malattie
+const DISEASES_NB_RESULTS = 3;
+const DISEASE_SCORE_THRESHOLD = 0.25;
 
 function setResultMessage(html) {
   resultBox.innerHTML = html;
@@ -80,7 +80,7 @@ async function startCamera() {
       <div class="result-card">
         <div class="result-section">
           <div class="result-title">Fotocamera attiva</div>
-          Inquadra bene foglie e pianta, poi premi <b>Scatta foto</b>.
+          Inquadra bene foglie, macchie, parti secche o zone sospette, poi premi <b>Scatta foto</b>.
         </div>
       </div>
     `);
@@ -238,27 +238,39 @@ async function analyzeCurrentImage() {
   setResultMessage(`
     <div class="result-card">
       <div class="result-section">
-        <div class="result-title">Analisi reale in corso...</div>
-        Sto inviando la foto al motore di riconoscimento della pianta.
+        <div class="result-title">Analisi in corso...</div>
+        Sto eseguendo il riconoscimento della specie e la verifica di possibili malattie.
       </div>
     </div>
   `);
 
   try {
     const blob = dataURLToBlob(currentImageData);
-    const response = await identifyPlantWithPlantNet(blob);
-    const analysis = mapPlantNetResponseToAnalysis(response);
+
+    const [speciesResponse, diseasesResponse] = await Promise.allSettled([
+      identifyPlantWithPlantNet(blob),
+      identifyDiseaseWithPlantNet(blob)
+    ]);
+
+    if (speciesResponse.status !== "fulfilled") {
+      throw speciesResponse.reason;
+    }
+
+    const analysis = mapCombinedResponseToAnalysis(
+      speciesResponse.value,
+      diseasesResponse.status === "fulfilled" ? diseasesResponse.value : null
+    );
 
     renderAnalysis(analysis);
     saveAnalysisToHistory(analysis, currentImageData);
     renderHistory();
   } catch (error) {
-    console.error("Errore riconoscimento:", error);
+    console.error("Errore analisi:", error);
 
     setResultMessage(`
       <div class="result-card">
         <div class="result-section">
-          <div class="result-title">Errore durante il riconoscimento</div>
+          <div class="result-title">Errore durante l'analisi</div>
           ${escapeHtml(error.message || "Non sono riuscito a completare l'analisi.")}
         </div>
       </div>
@@ -284,41 +296,68 @@ async function identifyPlantWithPlantNet(imageBlob) {
   });
 
   if (!response.ok) {
-    let extra = "";
-    try {
-      extra = await response.text();
-    } catch (_) {}
+    const extra = await safeReadText(response);
 
-    if (response.status === 404) {
-      throw new Error("Endpoint non trovato. Controlla progetto o URL API.");
-    }
-    if (response.status === 429) {
-      throw new Error("Limite richieste raggiunto per oggi.");
-    }
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("API key non valida o non autorizzata.");
-    }
+    if (response.status === 404) throw new Error("Endpoint specie non trovato.");
+    if (response.status === 429) throw new Error("Limite richieste raggiunto per oggi.");
+    if (response.status === 401 || response.status === 403) throw new Error("API key non valida o non autorizzata.");
 
-    throw new Error(`Errore API (${response.status}). ${extra}`);
+    throw new Error(`Errore API specie (${response.status}). ${extra}`);
   }
 
   const data = await response.json();
 
   if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
-    throw new Error("Nessun risultato trovato. Prova con una foto più nitida della pianta.");
+    throw new Error("Nessun risultato specie trovato. Prova con una foto più nitida.");
   }
 
   return data;
 }
 
-function mapPlantNetResponseToAnalysis(data) {
-  const top = data.results[0];
+async function identifyDiseaseWithPlantNet(imageBlob) {
+  const url =
+    `https://my-api.plantnet.org/v2/diseases/identify` +
+    `?api-key=${encodeURIComponent(PLANTNET_API_KEY)}` +
+    `&nb-results=${encodeURIComponent(DISEASES_NB_RESULTS)}` +
+    `&lang=it` +
+    `&include-related-images=true`;
+
+  const formData = new FormData();
+  formData.append("images", imageBlob, "plant.jpg");
+  formData.append("organs", "auto");
+
+  const response = await fetch(url, {
+    method: "POST",
+    body: formData
+  });
+
+  if (!response.ok) {
+    const extra = await safeReadText(response);
+
+    if (response.status === 404) {
+      throw new Error("Endpoint malattie non trovato.");
+    }
+    if (response.status === 429) {
+      throw new Error("Limite richieste malattie raggiunto per oggi.");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("API key non valida per diagnosi malattie.");
+    }
+
+    throw new Error(`Errore API malattie (${response.status}). ${extra}`);
+  }
+
+  return await response.json();
+}
+
+function mapCombinedResponseToAnalysis(speciesData, diseasesData) {
+  const top = speciesData.results[0];
   const species = top.species || {};
 
   const scientificName =
     species.scientificNameWithoutAuthor ||
     species.scientificName ||
-    data.bestMatch ||
+    speciesData.bestMatch ||
     "Specie non determinata";
 
   const commonNames = Array.isArray(species.commonNames) ? species.commonNames : [];
@@ -328,13 +367,13 @@ function mapPlantNetResponseToAnalysis(data) {
   const genus = species.genus?.scientificNameWithoutAuthor || species.genus?.scientificName || "Genere non disponibile";
 
   const confidence = Math.round((top.score || 0) * 100);
-  const predictedOrgan = data.predictedOrgans?.[0]?.organ || "auto";
-  const remaining = data.remainingIdentificationRequests ?? "n/d";
+  const predictedOrgan = speciesData.predictedOrgans?.[0]?.organ || "auto";
+  const remaining = speciesData.remainingIdentificationRequests ?? "n/d";
 
   const care = generateCareTipsFromPlantName(scientificName, commonName);
-  const health = generateVisualStatusMessage(confidence);
+  const speciesHealth = generateVisualStatusMessage(confidence);
 
-  const alternatives = data.results.slice(1, 3).map((item) => {
+  const alternatives = speciesData.results.slice(1, 3).map((item) => {
     const altName =
       item.species?.scientificNameWithoutAuthor ||
       item.species?.scientificName ||
@@ -342,13 +381,15 @@ function mapPlantNetResponseToAnalysis(data) {
     return `${altName} (${Math.round((item.score || 0) * 100)}%)`;
   });
 
+  const diseaseInfo = parseDiseaseInfo(diseasesData);
+
   return {
     plant: scientificName,
     commonName,
     family,
     genus,
     confidence,
-    health,
+    health: speciesHealth,
     water: care.water,
     light: care.light,
     causes: [
@@ -357,18 +398,58 @@ function mapPlantNetResponseToAnalysis(data) {
       alternatives.length ? `alternative probabili: ${alternatives.join(", ")}` : "nessuna alternativa forte disponibile"
     ],
     care: care.tips,
-    remainingRequests: remaining
+    remainingRequests: remaining,
+    disease: diseaseInfo
+  };
+}
+
+function parseDiseaseInfo(diseasesData) {
+  if (!diseasesData || !Array.isArray(diseasesData.results) || diseasesData.results.length === 0) {
+    return {
+      status: "none",
+      title: "Nessuna diagnosi malattie disponibile",
+      summary: "Il servizio non ha restituito risultati utili per la diagnosi."
+    };
+  }
+
+  const top = diseasesData.results[0];
+  const score = Number(top.score || 0);
+  const scorePercent = Math.round(score * 100);
+
+  if (score < DISEASE_SCORE_THRESHOLD) {
+    return {
+      status: "low",
+      title: "Diagnosi troppo incerta",
+      summary: `Il risultato principale è troppo debole (${scorePercent}%). Conviene fare una foto più ravvicinata della parte malata.`,
+      topResults: diseasesData.results.slice(0, 3).map((item) => ({
+        code: item.name || "N/D",
+        description: item.description || item.label || "Descrizione non disponibile",
+        scorePercent: Math.round((item.score || 0) * 100)
+      }))
+    };
+  }
+
+  return {
+    status: "detected",
+    title: "Possibile problema rilevato",
+    summary: `${top.description || "Patologia non descritta"} (${scorePercent}%)`,
+    topResults: diseasesData.results.slice(0, 3).map((item) => ({
+      code: item.name || "N/D",
+      description: item.description || item.label || "Descrizione non disponibile",
+      scorePercent: Math.round((item.score || 0) * 100)
+    })),
+    remainingRequests: diseasesData.remainingIdentificationRequests ?? "n/d"
   };
 }
 
 function generateVisualStatusMessage(confidence) {
   if (confidence >= 85) {
-    return "Riconoscimento molto affidabile. Per lo stato di salute visivo servono ulteriori controlli specifici.";
+    return "Riconoscimento specie molto affidabile.";
   }
   if (confidence >= 65) {
-    return "Riconoscimento abbastanza affidabile. Conviene fare anche una seconda foto più ravvicinata delle foglie.";
+    return "Riconoscimento specie abbastanza affidabile. Una seconda foto può migliorare il risultato.";
   }
-  return "Riconoscimento incerto. Prova con una foto più nitida, sfondo semplice e foglie ben visibili.";
+  return "Riconoscimento specie incerto. Prova con una foto più nitida e più vicina.";
 }
 
 function generateCareTipsFromPlantName(scientificName, commonName) {
@@ -380,7 +461,7 @@ function generateCareTipsFromPlantName(scientificName, commonName) {
       light: "Intensa indiretta",
       tips: [
         "innaffia quando il terriccio è asciutto nei primi centimetri",
-        "evita sole diretto forte sulle foglie",
+        "evita sole diretto forte",
         "aumenta leggermente l'umidità ambientale"
       ]
     };
@@ -434,11 +515,13 @@ function generateCareTipsFromPlantName(scientificName, commonName) {
 }
 
 function renderAnalysis(analysis) {
+  const diseaseHtml = renderDiseaseSection(analysis.disease);
+
   setResultMessage(`
     <div class="result-card">
       <div class="result-top">
         <div class="result-chip">🌿 ${escapeHtml(analysis.plant)}</div>
-        <div class="result-chip">📊 Affidabilità: ${analysis.confidence}%</div>
+        <div class="result-chip">📊 Affidabilità specie: ${analysis.confidence}%</div>
         <div class="result-chip">💧 Acqua: ${escapeHtml(analysis.water)}</div>
         <div class="result-chip">☀️ Luce: ${escapeHtml(analysis.light)}</div>
       </div>
@@ -452,7 +535,7 @@ function renderAnalysis(analysis) {
       </div>
 
       <div class="result-section">
-        <div class="result-title">Valutazione</div>
+        <div class="result-title">Valutazione specie</div>
         ${escapeHtml(analysis.health)}
       </div>
 
@@ -461,17 +544,47 @@ function renderAnalysis(analysis) {
         ${analysis.causes.map((item) => `• ${escapeHtml(item)}`).join("<br>")}
       </div>
 
+      ${diseaseHtml}
+
       <div class="result-section">
         <div class="result-title">Consigli base di cura</div>
         ${analysis.care.map((item) => `• ${escapeHtml(item)}`).join("<br>")}
       </div>
 
       <div class="note-box">
-        <strong>Richieste rimanenti oggi:</strong> ${escapeHtml(String(analysis.remainingRequests))}<br>
-        Il riconoscimento specie è reale. La diagnosi completa delle malattie la collegheremo in un secondo step.
+        <strong>Richieste specie rimanenti oggi:</strong> ${escapeHtml(String(analysis.remainingRequests))}
       </div>
     </div>
   `);
+}
+
+function renderDiseaseSection(disease) {
+  if (!disease) {
+    return `
+      <div class="result-section">
+        <div class="result-title">Diagnosi malattie</div>
+        Nessun dato disponibile.
+      </div>
+    `;
+  }
+
+  const topResultsHtml = Array.isArray(disease.topResults) && disease.topResults.length
+    ? disease.topResults
+        .map(
+          (item) =>
+            `• ${escapeHtml(item.description)} — codice ${escapeHtml(item.code)} — ${escapeHtml(String(item.scorePercent))}%`
+        )
+        .join("<br>")
+    : "Nessun dettaglio disponibile.";
+
+  return `
+    <div class="result-section">
+      <div class="result-title">Diagnosi malattie</div>
+      <strong>${escapeHtml(disease.title)}</strong><br>
+      ${escapeHtml(disease.summary)}<br><br>
+      ${topResultsHtml}
+    </div>
+  `;
 }
 
 function getHistory() {
@@ -499,6 +612,7 @@ function saveAnalysisToHistory(analysis, imageData) {
     health: analysis.health,
     water: analysis.water,
     light: analysis.light,
+    diseaseSummary: analysis.disease?.summary || "Nessuna diagnosi disponibile",
     date: new Date().toLocaleString("it-IT")
   });
 
@@ -524,7 +638,8 @@ function renderHistory() {
               Stato: ${escapeHtml(item.health)}<br>
               Acqua: ${escapeHtml(item.water)}<br>
               Luce: ${escapeHtml(item.light)}<br>
-              Affidabilità: ${escapeHtml(String(item.confidence))}%
+              Malattie: ${escapeHtml(item.diseaseSummary)}<br>
+              Affidabilità specie: ${escapeHtml(String(item.confidence))}%
             </div>
             <div class="history-date">${escapeHtml(item.date)}</div>
           </div>
@@ -553,6 +668,14 @@ function dataURLToBlob(dataURL) {
   }
 
   return new Blob([bytes], { type: mime });
+}
+
+async function safeReadText(response) {
+  try {
+    return await response.text();
+  } catch (_) {
+    return "";
+  }
 }
 
 function escapeHtml(value) {
