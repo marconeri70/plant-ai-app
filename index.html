@@ -15,13 +15,14 @@
 <body>
   <div class="app-shell">
     <header class="hero">
+      <div class="hero-overlay"></div>
       <div class="hero-content">
         <div class="hero-top">
-          <div>
-            <div class="hero-badge">🌿 AI Plant Scanner</div>
+          <div class="hero-text">
+            <div class="hero-badge">🌿 Plant AI Scanner</div>
             <h1>Fotografa la tua pianta e scopri come sta</h1>
             <p>
-              Scatta una foto oppure caricala dal telefono per ottenere
+              Scatta una foto oppure scegli un’immagine dalla galleria per ottenere
               riconoscimento specie, verifica botanica, controllo geografico
               e analisi del possibile stato della pianta.
             </p>
@@ -39,8 +40,9 @@
         <div class="panel-header">
           <h2>Fotocamera e caricamento</h2>
           <p>
-            Usa la fotocamera del telefono o carica una foto dalla galleria.
-            Puoi anche attivare la posizione per aumentare l’affidabilità del risultato.
+            Usa la fotocamera del telefono oppure seleziona una foto già presente
+            nella galleria. Puoi anche attivare la posizione per migliorare
+            l’affidabilità del risultato finale.
           </p>
         </div>
 
@@ -50,9 +52,9 @@
           <img id="preview" class="hidden" alt="Anteprima foto pianta" />
           <div id="cameraPlaceholder" class="camera-placeholder">
             <div class="placeholder-icon">📷</div>
+            <div class="placeholder-title">Nessuna foto acquisita</div>
             <div class="placeholder-text">
-              Nessuna foto acquisita.<br />
-              Apri la fotocamera oppure seleziona un’immagine.
+              Apri la fotocamera oppure scegli un’immagine dalla galleria.
             </div>
           </div>
         </div>
@@ -69,8 +71,25 @@
         </div>
 
         <div class="upload-block">
-          <label for="fileInput" class="upload-title">Carica una foto</label>
-          <input type="file" id="fileInput" accept="image/*" capture="environment" />
+          <div class="upload-card">
+            <div class="upload-card-text">
+              <div class="upload-card-title">Carica una foto dalla galleria</div>
+              <div class="upload-card-subtitle">
+                Tocca il pulsante per aprire cartella o galleria del telefono.
+              </div>
+            </div>
+
+            <label for="fileInput" class="upload-button">
+              Scegli dalla galleria
+            </label>
+
+            <input
+              type="file"
+              id="fileInput"
+              accept="image/*"
+              class="hidden-input"
+            />
+          </div>
         </div>
       </section>
 
@@ -78,7 +97,7 @@
         <div class="panel-header">
           <h2>Analisi della pianta</h2>
           <p>
-            Qui comparirà il risultato del riconoscimento della specie,
+            Qui comparirà il risultato del riconoscimento specie,
             della verifica botanica, del controllo geografico e della diagnosi visiva.
           </p>
         </div>
