@@ -20,9 +20,9 @@ let currentImageData = null;
 let deferredPrompt = null;
 let currentLocation = null;
 
-const STORAGE_KEY = "plant_ai_history_v6";
+const STORAGE_KEY = "plant_ai_history_v7";
 const LOCATION_KEY = "plant_ai_location_v1";
-const PLANTNET_API_KEY = "2b10OfTLt1KLLHWfjIAqvR3HDe";
+const PLANTNET_API_KEY = "INSERISCI_LA_TUA_API_KEY";
 
 const PLANTNET_PROJECT = "all";
 const PLANTNET_ORGAN = "auto";
@@ -37,15 +37,11 @@ function setResultMessage(html) {
 }
 
 function showPlaceholder() {
-  if (cameraPlaceholder) {
-    cameraPlaceholder.classList.remove("hidden");
-  }
+  if (cameraPlaceholder) cameraPlaceholder.classList.remove("hidden");
 }
 
 function hidePlaceholder() {
-  if (cameraPlaceholder) {
-    cameraPlaceholder.classList.add("hidden");
-  }
+  if (cameraPlaceholder) cameraPlaceholder.classList.add("hidden");
 }
 
 function setLocationStatus(text, isError = false) {
@@ -179,7 +175,6 @@ function takePhoto() {
 
   const width = video.videoWidth;
   const height = video.videoHeight;
-
   if (!width || !height) return;
 
   canvas.width = width;
@@ -425,9 +420,7 @@ async function fetchGbifNearbyOccurrences(usageKey, location) {
 
   const url =
     `https://api.gbif.org/v1/occurrence/search?taxon_key=${encodeURIComponent(usageKey)}` +
-    `&limit=20` +
-    `&has_coordinate=true` +
-    `&geometry=${encodeURIComponent(geometry)}`;
+    `&limit=20&has_coordinate=true&geometry=${encodeURIComponent(geometry)}`;
 
   try {
     const response = await fetch(url);
@@ -708,59 +701,98 @@ function renderAnalysis(analysis) {
   const severityBadge = getSeverityBadge(analysis.disease);
 
   const alternativesHtml = analysis.alternatives && analysis.alternatives.length
-    ? analysis.alternatives
-        .map((item) => `• ${escapeHtml(item.name)} — punteggio finale ${escapeHtml(String(item.finalScore))}%`)
-        .join("<br>")
+    ? `<ul class="result-list">${analysis.alternatives
+        .map((item) => `<li>${escapeHtml(item.name)} — punteggio finale ${escapeHtml(String(item.finalScore))}%</li>`)
+        .join("")}</ul>`
     : "Nessuna alternativa forte disponibile.";
 
-  const locationHtml = analysis.location
+  const locationSummary = analysis.location
     ? `
-      <strong>Posizione usata:</strong> ${escapeHtml(analysis.location.latitude.toFixed(5))}, ${escapeHtml(analysis.location.longitude.toFixed(5))}<br>
-      <strong>Accuratezza GPS:</strong> ±${escapeHtml(String(Math.round(analysis.location.accuracy)))} m<br>
-      <strong>Verifica geografica:</strong> ${escapeHtml(analysis.geography.summary)}<br>
-      <strong>Occorrenze vicine GBIF:</strong> ${escapeHtml(String(analysis.geography.nearbyCount))}${analysis.geography.radiusKm ? ` entro circa ${escapeHtml(String(analysis.geography.radiusKm))} km` : ""}
+      <div class="tech-item">
+        <div class="tech-label">Posizione usata</div>
+        <div class="tech-value">${escapeHtml(analysis.location.latitude.toFixed(5))}, ${escapeHtml(analysis.location.longitude.toFixed(5))}</div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-label">Accuratezza GPS</div>
+        <div class="tech-value">±${escapeHtml(String(Math.round(analysis.location.accuracy)))} m</div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-label">Occorrenze vicine GBIF</div>
+        <div class="tech-value">${escapeHtml(String(analysis.geography.nearbyCount))}${analysis.geography.radiusKm ? ` entro ${escapeHtml(String(analysis.geography.radiusKm))} km` : ""}</div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-label">Esito geografico</div>
+        <div class="tech-value">${escapeHtml(analysis.geography.summary)}</div>
+      </div>
     `
-    : "Posizione non usata. Puoi migliorare l’affidabilità attivando il pulsante posizione.";
+    : `
+      <div class="tech-item">
+        <div class="tech-label">Geolocalizzazione</div>
+        <div class="tech-value">Non usata</div>
+      </div>
+      <div class="tech-item">
+        <div class="tech-label">Suggerimento</div>
+        <div class="tech-value">Attiva “Usa posizione” per migliorare l’affidabilità.</div>
+      </div>
+    `;
 
   setResultMessage(`
     <div class="result-card">
-      <div class="result-top">
-        <div class="result-chip">🌿 ${escapeHtml(analysis.plant)}</div>
-        <div class="result-chip">📊 Foto: ${escapeHtml(String(analysis.confidence))}%</div>
-        <div class="result-chip">🧭 Geo score: ${escapeHtml(String(analysis.geoScore))}%</div>
-        <div class="result-chip">⭐ Punteggio finale: ${escapeHtml(String(analysis.finalScore))}%</div>
+      <div class="result-hero">
+        <div class="result-hero-top">
+          <div>
+            <div class="result-main-name">${escapeHtml(analysis.plant)}</div>
+            <div class="result-subname">${escapeHtml(analysis.commonName)} • ${escapeHtml(analysis.family)}</div>
+          </div>
+          <div class="result-hero-score">
+            <div class="result-hero-score-label">Affidabilità finale</div>
+            <div class="result-hero-score-value">${escapeHtml(String(analysis.finalScore))}%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="result-summary-grid">
+        <div class="summary-card">
+          <div class="summary-label">Riconoscimento foto</div>
+          <div class="summary-value">${escapeHtml(String(analysis.confidence))}%</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">Controllo geografico</div>
+          <div class="summary-value">${escapeHtml(String(analysis.geoScore))}%</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">Acqua</div>
+          <div class="summary-value">${escapeHtml(analysis.water)}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">Luce</div>
+          <div class="summary-value">${escapeHtml(analysis.light)}</div>
+        </div>
       </div>
 
       <div class="result-section">
-        <div class="result-title">Specie riconosciuta</div>
-        <strong>Nome scientifico:</strong> ${escapeHtml(analysis.plant)}<br>
-        <strong>Nome comune:</strong> ${escapeHtml(analysis.commonName)}<br>
-        <strong>Genere:</strong> ${escapeHtml(analysis.genus)}<br>
-        <strong>Famiglia:</strong> ${escapeHtml(analysis.family)}<br>
-        <strong>Valutazione finale:</strong> ${escapeHtml(analysis.health)}
-      </div>
-
-      <div class="result-section">
-        <div class="result-title">Verifica botanica database</div>
-        ${analysis.gbif.found ? `
-          <strong>Esito:</strong> ${escapeHtml(analysis.gbif.summary)}<br>
-          <strong>Nome accettato:</strong> ${escapeHtml(analysis.gbif.scientificName)}<br>
-          <strong>Canonical name:</strong> ${escapeHtml(analysis.gbif.canonicalName)}<br>
-          <strong>Status:</strong> ${escapeHtml(analysis.gbif.status)}<br>
-          <strong>Rank:</strong> ${escapeHtml(analysis.gbif.rank)}<br>
-          <strong>Match type:</strong> ${escapeHtml(analysis.gbif.matchType)}<br>
-          <strong>Confidence GBIF:</strong> ${escapeHtml(String(analysis.gbif.confidence))}
-        ` : escapeHtml(analysis.gbif.summary)}
-      </div>
-
-      <div class="result-section">
-        <div class="result-title">Controllo geografico</div>
-        ${locationHtml}
-      </div>
-
-      <div class="result-section">
-        <div class="result-title">Alternative considerate</div>
-        ${alternativesHtml}
+        <div class="result-title">Risultato principale</div>
+        <div class="result-tech-grid">
+          <div class="tech-item">
+            <div class="tech-label">Nome scientifico</div>
+            <div class="tech-value">${escapeHtml(analysis.plant)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Nome comune</div>
+            <div class="tech-value">${escapeHtml(analysis.commonName)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Genere</div>
+            <div class="tech-value">${escapeHtml(analysis.genus)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Famiglia</div>
+            <div class="tech-value">${escapeHtml(analysis.family)}</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <strong>Valutazione finale:</strong> ${escapeHtml(analysis.health)}
+        </div>
       </div>
 
       <div class="result-section">
@@ -771,14 +803,59 @@ function renderAnalysis(analysis) {
             ${escapeHtml(severityBadge.label)}
           </div>
         </div>
-        <br>
-        <strong>${escapeHtml(analysis.disease.title)}</strong><br>
-        ${escapeHtml(analysis.disease.summary)}
+        <div style="margin-top:12px;">
+          <strong>${escapeHtml(analysis.disease.title)}</strong><br>
+          ${escapeHtml(analysis.disease.summary)}
+        </div>
       </div>
 
       <div class="result-section">
         <div class="result-title">Consigli base di cura</div>
-        ${analysis.care.map((item) => `• ${escapeHtml(item)}`).join("<br>")}
+        <ul class="result-list">
+          ${analysis.care.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+        </ul>
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Verifica botanica</div>
+        <div class="result-tech-grid">
+          <div class="tech-item">
+            <div class="tech-label">Esito</div>
+            <div class="tech-value">${escapeHtml(analysis.gbif.summary)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Nome accettato</div>
+            <div class="tech-value">${escapeHtml(analysis.gbif.scientificName)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Canonical name</div>
+            <div class="tech-value">${escapeHtml(analysis.gbif.canonicalName)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Status</div>
+            <div class="tech-value">${escapeHtml(analysis.gbif.status)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Rank</div>
+            <div class="tech-value">${escapeHtml(analysis.gbif.rank)}</div>
+          </div>
+          <div class="tech-item">
+            <div class="tech-label">Confidence GBIF</div>
+            <div class="tech-value">${escapeHtml(String(analysis.gbif.confidence))}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Controllo geografico</div>
+        <div class="result-tech-grid">
+          ${locationSummary}
+        </div>
+      </div>
+
+      <div class="result-section">
+        <div class="result-title">Alternative considerate</div>
+        ${alternativesHtml}
       </div>
     </div>
   `);
@@ -879,9 +956,7 @@ function escapeHtml(value) {
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredPrompt = event;
-  if (installBtn) {
-    installBtn.classList.remove("hidden");
-  }
+  if (installBtn) installBtn.classList.remove("hidden");
 });
 
 if (installBtn) {
@@ -894,13 +969,8 @@ if (installBtn) {
   });
 }
 
-if (locationBtn) {
-  locationBtn.addEventListener("click", requestLocation);
-}
-
-if (clearHistoryBtn) {
-  clearHistoryBtn.addEventListener("click", clearHistory);
-}
+if (locationBtn) locationBtn.addEventListener("click", requestLocation);
+if (clearHistoryBtn) clearHistoryBtn.addEventListener("click", clearHistory);
 
 window.addEventListener("beforeunload", stopCamera);
 
