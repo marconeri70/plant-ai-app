@@ -8,8 +8,8 @@
   --green-3: #e8f5e9;
   --green-4: #f3fbf4;
   --green-5: #f7fcf7;
-  --text-1: #1c251d;
-  --text-2: #566457;
+  --text-1: #1b231c;
+  --text-2: #586558;
   --text-3: #7a877b;
   --white: #ffffff;
   --danger: #c62828;
@@ -26,8 +26,7 @@
 body {
   margin: 0;
   font-family: Arial, Helvetica, sans-serif;
-  background:
-    radial-gradient(circle at top left, #edf7ef 0%, #f4f7f3 35%, #eef2ef 100%);
+  background: radial-gradient(circle at top left, #edf7ef 0%, #f4f7f3 35%, #eef2ef 100%);
   color: var(--text-1);
 }
 
@@ -50,8 +49,7 @@ body {
   inset: 0;
   background:
     radial-gradient(circle at 10% 20%, rgba(255,255,255,0.18), transparent 30%),
-    radial-gradient(circle at 85% 15%, rgba(255,255,255,0.12), transparent 24%),
-    radial-gradient(circle at 70% 80%, rgba(255,255,255,0.08), transparent 22%);
+    radial-gradient(circle at 85% 15%, rgba(255,255,255,0.12), transparent 24%);
   pointer-events: none;
 }
 
@@ -82,7 +80,6 @@ body {
   margin-bottom: 14px;
   font-size: 13px;
   font-weight: bold;
-  letter-spacing: 0.2px;
 }
 
 .hero h1 {
@@ -327,31 +324,128 @@ button:disabled {
   gap: 14px;
 }
 
-.result-top {
+.result-hero {
+  background: linear-gradient(135deg, #ffffff, #f6fbf7);
+  border: 1px solid #dbe7dc;
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: var(--shadow-soft);
+}
+
+.result-hero-top {
   display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
   flex-wrap: wrap;
+}
+
+.result-main-name {
+  font-size: 24px;
+  font-weight: bold;
+  line-height: 1.2;
+  margin-bottom: 6px;
+}
+
+.result-subname {
+  color: var(--text-2);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.result-hero-score {
+  min-width: 110px;
+  text-align: center;
+  background: linear-gradient(135deg, #eef8ef, #dff1e2);
+  border: 1px solid #cfe4d2;
+  border-radius: 18px;
+  padding: 12px;
+}
+
+.result-hero-score-label {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+
+.result-hero-score-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: var(--green-1);
+}
+
+.result-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
-.result-chip {
-  background: white;
-  border: 1px solid #d8e8d8;
-  padding: 9px 13px;
-  border-radius: 999px;
-  font-size: 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+.summary-card {
+  background: #ffffff;
+  border: 1px solid #dde8de;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: var(--shadow-soft);
+}
+
+.summary-label {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.summary-value {
+  font-size: 19px;
+  font-weight: bold;
+  color: var(--text-1);
 }
 
 .result-section {
-  background: rgba(255, 255, 255, 0.82);
-  border-radius: 16px;
-  padding: 13px;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 18px;
+  padding: 14px;
   border: 1px solid rgba(220, 237, 200, 0.95);
 }
 
 .result-title {
   font-weight: bold;
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+
+.result-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.result-list li {
   margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.result-tech-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tech-item {
+  background: #fbfdfb;
+  border: 1px solid #e2ece3;
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.tech-label {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.tech-value {
+  font-size: 16px;
+  font-weight: bold;
+  line-height: 1.4;
 }
 
 .note-box {
@@ -501,6 +595,16 @@ button:disabled {
   color: #6c7b6c;
 }
 
+@media (max-width: 900px) {
+  .result-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .result-tech-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 800px) {
   .action-grid {
     grid-template-columns: 1fr 1fr;
@@ -550,7 +654,15 @@ button:disabled {
     width: 100%;
   }
 
-  .result-top {
-    flex-direction: column;
+  .result-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .result-main-name {
+    font-size: 22px;
+  }
+
+  .result-hero-score {
+    width: 100%;
   }
 }
