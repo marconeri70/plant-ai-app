@@ -60,7 +60,7 @@
         </div>
 
         <div class="action-grid">
-          <button id="startCameraBtn" class="primary-btn">Apri fotocamera</button>
+          <button id="startCameraBtn" class="primary-btn" disabled>Apri fotocamera</button>
           <button id="takePhotoBtn" class="secondary-btn" disabled>Scatta foto</button>
           <button id="resetBtn" class="ghost-btn" disabled>Nuova foto</button>
           <button id="locationBtn" class="ghost-btn">Usa posizione</button>
@@ -88,6 +88,7 @@
               id="fileInput"
               accept="image/*"
               class="hidden-input"
+              disabled
             />
           </div>
         </div>
@@ -116,7 +117,7 @@
             <div class="feature-icon">🌱</div>
             <div>
               <strong>Riconoscimento specie</strong><br />
-              Identificazione probabile della pianta fotografata tramite AI.
+              Identificazione probabile della pianta fotografata tramite AI Locale (Nessun dato inviato al server).
             </div>
           </div>
 
@@ -140,7 +141,7 @@
             <div class="feature-icon">🍂</div>
             <div>
               <strong>Valutazione stato pianta</strong><br />
-              Analisi di possibili segnali di stress o problemi sulle foglie.
+              Analisi di base dello stato di salute.
             </div>
           </div>
 
