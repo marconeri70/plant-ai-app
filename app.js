@@ -19,10 +19,10 @@ let stream = null;
 let currentImageData = null;
 let deferredPrompt = null;
 let currentLocation = null;
+let localAiModel = null; // NUOVO: La nostra AI locale
 
 const STORAGE_KEY = "plant_ai_history_v8";
 const LOCATION_KEY = "plant_ai_location_v1";
-const PLANTNET_API_KEY = "INSERISCI_LA_TUA_API_KEY";
 const API_BASE =
   typeof window !== "undefined" && window.location.hostname.includes("github.io")
     ? ""
