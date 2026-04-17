@@ -19,18 +19,10 @@ let stream = null;
 let currentImageData = null;
 let deferredPrompt = null;
 let currentLocation = null;
-let localAiModel = null; // NUOVO: La nostra AI locale
+let localAiModel = null; // Il nostro motore locale TensorFlow.js
 
 const STORAGE_KEY = "plant_ai_history_v8";
 const LOCATION_KEY = "plant_ai_location_v1";
-const API_BASE =
-  typeof window !== "undefined" && window.location.hostname.includes("github.io")
-    ? ""
-    : "";
-
-const PLANTNET_PROJECT = "all";
-const PLANTNET_ORGAN = "auto";
-const PLANTNET_NB_RESULTS = 3;
 
 const DISEASES_NB_RESULTS = 3;
 const DISEASE_RED_THRESHOLD = 0.65;
@@ -149,7 +141,7 @@ async function startCamera() {
       <div class="result-card">
         <div class="result-section">
           <div class="result-title">Fotocamera attiva</div>
-          Inquadra bene foglie, bordi rovinati, macchie o parti secche e poi premi <b>Scatta foto</b>.
+          Inquadra bene foglie, fusto o fiore e poi premi <b>Scatta foto</b>.
         </div>
       </div>
     `);
@@ -194,7 +186,8 @@ function takePhoto() {
   video.classList.add("hidden");
   hidePlaceholder();
 
-  analyzeCurrentImage();
+  // Diamo al browser un frame per aggiornare l'immagine nel DOM prima di passarla all'AI
+  setTimeout(() => analyzeCurrentImage(), 50);
 }
 
 function resetPhoto() {
@@ -233,163 +226,131 @@ function handleFileUpload(event) {
     hidePlaceholder();
     resetBtn.disabled = false;
 
-    analyzeCurrentImage();
+    setTimeout(() => analyzeCurrentImage(), 50);
   };
   reader.readAsDataURL(file);
 }
 
-async function analyzeCurrentImage() {
-  if (!currentImageData) return;
+// ---------------------------------------------------------
+// INTEGRAZIONE EDGE AI (SISTEMA LOCALE)
+// ---------------------------------------------------------
 
-  if (!API_BASE && (!PLANTNET_API_KEY || PLANTNET_API_KEY === "INSERISCI_LA_TUA_API_KEY")) {
+async function initializeLocalAI() {
+  setResultMessage(`
+    <div class="result-card">
+      <div class="result-section" style="text-align: center;">
+        <div class="result-title">Caricamento Motore AI...</div>
+        <div style="font-size: 14px; color: #586558;">Inizializzazione delle reti neurali sul dispositivo. Nessun dato viene inviato a server di terze parti.</div>
+      </div>
+    </div>
+  `);
+
+  try {
+    localAiModel = await mobilenet.load({ version: 2, alpha: 1.0 });
     setResultMessage(`
       <div class="result-card">
         <div class="result-section">
-          <div class="result-title">API key mancante</div>
-          Inserisci la tua chiave API Pl@ntNet oppure usa il proxy sicuro.
+          <div class="result-title">Sistema Neurale Attivo</div>
+          Motore AI caricato in memoria. L'analisi avverrà sul tuo dispositivo. Fotografa una pianta.
         </div>
       </div>
     `);
+    
+    startCameraBtn.disabled = false;
+    fileInput.disabled = false;
+  } catch (error) {
+    console.error("Errore fatale caricamento AI:", error);
+    setResultMessage(`
+      <div class="result-card">
+        <div class="result-section">
+          <div class="result-title">Errore AI</div>
+          Errore nell'inizializzazione del motore neurale. Ricarica la pagina.
+        </div>
+      </div>
+    `);
+  }
+}
+
+function mapTfjsToPlantNetFormat(tfPredictions) {
+  const formattedResults = tfPredictions.map(pred => {
+    const names = pred.className.split(",").map(n => n.trim());
+    const primaryName = names[0];
+    
+    return {
+      score: pred.probability,
+      species: {
+        scientificNameWithoutAuthor: primaryName,
+        scientificName: primaryName,
+        commonNames: names,
+        family: { scientificName: "Non rilevabile offline" },
+        genus: { scientificName: "Richiede verifica GBIF" }
+      }
+    };
+  });
+
+  return { results: formattedResults };
+}
+
+async function analyzeCurrentImage() {
+  if (!currentImageData || !localAiModel) {
+    setResultMessage("Motore AI non ancora pronto. Attendi qualche istante.");
     return;
   }
 
   setResultMessage(`
     <div class="result-card">
       <div class="result-section">
-        <div class="result-title">Analisi in corso...</div>
-        Sto eseguendo riconoscimento specie, controllo malattie, verifica geografica e lettura visiva delle foglie.
+        <div class="result-title">Inferenza visiva in corso...</div>
+        Elaborazione tramite processore locale in esecuzione.
       </div>
     </div>
   `);
 
   try {
-    const blob = dataURLToBlob(currentImageData);
+    // 1. Elaborazione Edge: Il canvas viene letto direttamente dalla libreria TF.js
+    const previewElement = document.getElementById("preview");
+    const predictions = await localAiModel.classify(previewElement, 3);
 
-    const [speciesResponse, diseasesResponse, visualHealth] = await Promise.all([
-      identifyPlantWithPlantNet(blob),
-      identifyDiseaseWithPlantNet(blob).catch(() => null),
-      analyzeVisualHealth(currentImageData)
-    ]);
+    if (!predictions || predictions.length === 0) {
+      throw new Error("Il modello visivo non ha rilevato alcun target valido.");
+    }
 
-    const gbifChecks = await fetchGbifChecksForCandidates(speciesResponse, currentLocation);
+    // 2. Mappatura Adattatore (Isola l'UI dai cambiamenti di back-end)
+    const speciesData = mapTfjsToPlantNetFormat(predictions);
+    
+    // Al momento, il modello generalista non fa diagnosi di patologie
+    const diseasesData = null; 
+
+    // 3. Validazione incrociata gratuita su database GBIF
+    const gbifChecks = await fetchGbifChecksForCandidates(speciesData, currentLocation);
 
     const analysis = mapCombinedResponseToAnalysis(
-      speciesResponse,
-      diseasesResponse,
+      speciesData,
+      diseasesData,
       gbifChecks,
-      currentLocation,
-      visualHealth
+      currentLocation
     );
 
     renderAnalysis(analysis);
     saveAnalysisToHistory(analysis, currentImageData);
     renderHistory();
+
   } catch (error) {
     console.error(error);
     setResultMessage(`
       <div class="result-card">
         <div class="result-section">
-          <div class="result-title">Errore durante l'analisi</div>
-          ${escapeHtml(error.message || "Errore sconosciuto")}
+          <div class="result-title">Errore Elaborazione Visiva</div>
+          ${escapeHtml(error.message || "Eccezione sconosciuta nel runtime locale.")}
         </div>
       </div>
     `);
   }
 }
 
-async function identifyPlantWithPlantNet(imageBlob) {
-  if (API_BASE) {
-    const url = `${API_BASE}/identify`;
-
-    const formData = new FormData();
-    formData.append("images", imageBlob, "plant.jpg");
-    formData.append("organs", PLANTNET_ORGAN);
-
-    const response = await fetch(url, {
-      method: "POST",
-      body: formData
-    });
-
-    if (!response.ok) {
-      throw new Error(`Errore proxy specie (${response.status})`);
-    }
-
-    const data = await response.json();
-
-    if (!data.results || !data.results.length) {
-      throw new Error("Nessun risultato specie trovato.");
-    }
-
-    return data;
-  }
-
-  const url =
-    `https://my-api.plantnet.org/v2/identify/${encodeURIComponent(PLANTNET_PROJECT)}` +
-    `?api-key=${encodeURIComponent(PLANTNET_API_KEY)}` +
-    `&nb-results=${encodeURIComponent(PLANTNET_NB_RESULTS)}` +
-    `&lang=it` +
-    `&include-related-images=true`;
-
-  const formData = new FormData();
-  formData.append("images", imageBlob, "plant.jpg");
-  formData.append("organs", PLANTNET_ORGAN);
-
-  const response = await fetch(url, {
-    method: "POST",
-    body: formData
-  });
-
-  if (!response.ok) {
-    throw new Error(`Errore Pl@ntNet specie (${response.status})`);
-  }
-
-  const data = await response.json();
-
-  if (!data.results || !data.results.length) {
-    throw new Error("Nessun risultato specie trovato.");
-  }
-
-  return data;
-}
-
-async function identifyDiseaseWithPlantNet(imageBlob) {
-  if (API_BASE) {
-    const url = `${API_BASE}/diseases`;
-
-    const formData = new FormData();
-    formData.append("images", imageBlob, "plant.jpg");
-    formData.append("organs", "auto");
-
-    const response = await fetch(url, {
-      method: "POST",
-      body: formData
-    });
-
-    if (!response.ok) return null;
-    return await response.json();
-  }
-
-  const url =
-    `https://my-api.plantnet.org/v2/diseases/identify` +
-    `?api-key=${encodeURIComponent(PLANTNET_API_KEY)}` +
-    `&nb-results=${encodeURIComponent(DISEASES_NB_RESULTS)}` +
-    `&lang=it`;
-
-  const formData = new FormData();
-  formData.append("images", imageBlob, "plant.jpg");
-  formData.append("organs", "auto");
-
-  const response = await fetch(url, {
-    method: "POST",
-    body: formData
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  return await response.json();
-}
+// ---------------------------------------------------------
+// CHIAMATE DATI PUBBLICI (GBIF)
+// ---------------------------------------------------------
 
 async function fetchGbifChecksForCandidates(speciesData, location) {
   const candidates = (speciesData.results || []).slice(0, 3);
@@ -522,179 +483,11 @@ function createWktCircle(lat, lon, radiusKm) {
   return `POLYGON((${points.join(", ")}))`;
 }
 
-async function analyzeVisualHealth(imageDataUrl) {
-  const img = await loadImage(imageDataUrl);
+// ---------------------------------------------------------
+// LOGICA DI PRESENTAZIONE & ALGORITMI
+// ---------------------------------------------------------
 
-  const offCanvas = document.createElement("canvas");
-  const ctx = offCanvas.getContext("2d");
-
-  const maxSize = 220;
-  const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
-  const width = Math.max(1, Math.round(img.width * scale));
-  const height = Math.max(1, Math.round(img.height * scale));
-
-  offCanvas.width = width;
-  offCanvas.height = height;
-  ctx.drawImage(img, 0, 0, width, height);
-
-  const { data } = ctx.getImageData(0, 0, width, height);
-
-  let plantPixels = 0;
-  let greenPixels = 0;
-  let yellowPixels = 0;
-  let brownPixels = 0;
-  let darkSpotPixels = 0;
-  let palePixels = 0;
-
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const a = data[i + 3];
-
-    if (a < 20) continue;
-
-    const brightness = (r + g + b) / 3;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const saturation = max === 0 ? 0 : (max - min) / max;
-
-    const isPlantLike =
-      (g > r * 0.9 && g > b * 0.9 && g > 50) ||
-      (r > 80 && g > 80 && b < 120 && g >= r * 0.8);
-
-    if (!isPlantLike) continue;
-
-    plantPixels++;
-
-    if (g > r && g > b) greenPixels++;
-
-    const isYellow =
-      r > 120 && g > 110 && b < 120 && Math.abs(r - g) < 70;
-    if (isYellow) yellowPixels++;
-
-    const isBrown =
-      r > 70 && g > 35 && g < 120 && b < 90 && r > g && g > b;
-    if (isBrown) brownPixels++;
-
-    const isDarkSpot =
-      brightness < 75 && saturation > 0.18;
-    if (isDarkSpot) darkSpotPixels++;
-
-    const isPale =
-      brightness > 165 && saturation < 0.3;
-    if (isPale) palePixels++;
-  }
-
-  if (plantPixels < 150) {
-    return {
-      confidence: 0.15,
-      severity: "green",
-      title: "Analisi visiva limitata",
-      summary: "L’immagine non mostra abbastanza foglia utile per una valutazione visiva affidabile.",
-      metrics: {
-        yellowRatio: 0,
-        brownRatio: 0,
-        darkRatio: 0,
-        paleRatio: 0
-      },
-      suggestions: [
-        "Scatta una foto più ravvicinata della foglia danneggiata",
-        "Evita sfondi troppo complessi",
-        "Metti bene a fuoco bordi, macchie o parti secche"
-      ]
-    };
-  }
-
-  const yellowRatio = yellowPixels / plantPixels;
-  const brownRatio = brownPixels / plantPixels;
-  const darkRatio = darkSpotPixels / plantPixels;
-  const paleRatio = palePixels / plantPixels;
-
-  let score = 0;
-  score += yellowRatio * 1.2;
-  score += brownRatio * 1.5;
-  score += darkRatio * 1.1;
-  score += paleRatio * 0.8;
-
-  score = Math.min(score, 1);
-
-  let severity = "green";
-  let title = "Nessun forte stress visivo";
-  let summary = "La foglia non mostra segnali evidenti di danno grave nell’immagine analizzata.";
-  const suggestions = [];
-
-  if (score >= 0.55) {
-    severity = "red";
-    title = "Segnali visivi forti di stress";
-    summary = buildVisualSummary(yellowRatio, brownRatio, darkRatio, paleRatio, true);
-  } else if (score >= 0.25) {
-    severity = "yellow";
-    title = "Possibili segnali visivi di stress";
-    summary = buildVisualSummary(yellowRatio, brownRatio, darkRatio, paleRatio, false);
-  }
-
-  if (yellowRatio > 0.08) {
-    suggestions.push("Possibile ingiallimento: controlla acqua, drenaggio e luce");
-  }
-  if (brownRatio > 0.05) {
-    suggestions.push("Possibili bordi secchi o necrosi: controlla secchezza, sole forte o stress");
-  }
-  if (darkRatio > 0.04) {
-    suggestions.push("Possibili macchie scure: fai una foto più ravvicinata per confermare");
-  }
-  if (paleRatio > 0.1) {
-    suggestions.push("Possibile pallore fogliare: controlla nutrizione e illuminazione");
-  }
-  if (!suggestions.length) {
-    suggestions.push("Per migliorare la diagnosi fotografa una foglia singola molto ravvicinata");
-  }
-
-  return {
-    confidence: Number(score.toFixed(2)),
-    severity,
-    title,
-    summary,
-    metrics: {
-      yellowRatio,
-      brownRatio,
-      darkRatio,
-      paleRatio
-    },
-    suggestions
-  };
-}
-
-function buildVisualSummary(yellowRatio, brownRatio, darkRatio, paleRatio, strong) {
-  const signals = [];
-
-  if (yellowRatio > 0.08) signals.push("ingiallimento");
-  if (brownRatio > 0.05) signals.push("secchezza o bordi bruni");
-  if (darkRatio > 0.04) signals.push("macchie scure");
-  if (paleRatio > 0.1) signals.push("pallore diffuso");
-
-  if (!signals.length) {
-    return strong
-      ? "L’immagine suggerisce uno stress visivo marcato, ma serve una foto più precisa per capire il problema."
-      : "L’immagine suggerisce qualche segnale di stress, ma serve una foto più precisa per confermare.";
-  }
-
-  const base = signals.join(", ");
-  return strong
-    ? `L’immagine mostra segnali evidenti compatibili con ${base}.`
-    : `L’immagine mostra alcuni segnali compatibili con ${base}.`;
-}
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-function mapCombinedResponseToAnalysis(speciesData, diseasesData, gbifChecks, location, visualHealth) {
+function mapCombinedResponseToAnalysis(speciesData, diseasesData, gbifChecks, location) {
   const rankedCandidates = rankCandidates(speciesData, gbifChecks, location);
   const bestCandidate = rankedCandidates[0];
 
@@ -707,7 +500,7 @@ function mapCombinedResponseToAnalysis(speciesData, diseasesData, gbifChecks, lo
   const finalScore = Math.round((bestCandidate?.finalScore || 0) * 100);
   const geoScore = Math.round((bestCandidate?.geoScore || 0) * 100);
 
-  const disease = parseDiseaseInfo(diseasesData, visualHealth);
+  const disease = parseDiseaseInfo(diseasesData);
   const care = generateCareTipsFromPlantName(scientificName, commonName);
 
   return {
@@ -726,9 +519,8 @@ function mapCombinedResponseToAnalysis(speciesData, diseasesData, gbifChecks, lo
         : "Risultato finale ancora incerto.",
     water: care.water,
     light: care.light,
-    care: [...care.tips, ...disease.extraCare],
+    care: care.tips,
     disease,
-    visualHealth,
     location,
     gbif: {
       found: !!bestCandidate?.taxonomy?.found,
@@ -814,99 +606,40 @@ function rankCandidates(speciesData, gbifChecks, location) {
     .sort((a, b) => b.finalScore - a.finalScore);
 }
 
-function parseDiseaseInfo(diseasesData, visualHealth) {
-  const visualSeverity = visualHealth?.severity || "green";
-  const visualScorePercent = Math.round((visualHealth?.confidence || 0) * 100);
-
-  let apiDisease = null;
-
-  if (diseasesData && Array.isArray(diseasesData.results) && diseasesData.results.length) {
-    const top = diseasesData.results[0];
-    const score = Number(top.score || 0);
-    const scorePercent = Math.round(score * 100);
-
-    if (score >= DISEASE_RED_THRESHOLD) {
-      apiDisease = {
-        source: "api",
-        severity: "red",
-        title: "Problema probabile rilevato",
-        summary: `${top.description || "Patologia non descritta"} (${scorePercent}%).`,
-        confidence: scorePercent
-      };
-    } else if (score >= DISEASE_YELLOW_THRESHOLD) {
-      apiDisease = {
-        source: "api",
-        severity: "yellow",
-        title: "Possibile problema da controllare",
-        summary: `${top.description || "Problema non descritto"} (${scorePercent}%).`,
-        confidence: scorePercent
-      };
-    } else {
-      apiDisease = {
-        source: "api",
-        severity: "green",
-        title: "Diagnosi API debole",
-        summary: `L’API malattie ha restituito un segnale debole (${scorePercent}%).`,
-        confidence: scorePercent
-      };
-    }
+function parseDiseaseInfo(diseasesData) {
+  if (!diseasesData || !Array.isArray(diseasesData.results) || !diseasesData.results.length) {
+    return {
+      severity: "green",
+      title: "Funzione non attiva",
+      summary: "Diagnosi delle patologie non inclusa nel modello Edge AI base."
+    };
   }
 
-  let finalSeverity = "green";
-  let title = "Nessun problema rilevante";
-  let summary = "Non emergono problemi forti dall’analisi disponibile.";
-  let source = "visual";
-  const extraCare = [];
+  const top = diseasesData.results[0];
+  const score = Number(top.score || 0);
+  const scorePercent = Math.round(score * 100);
 
-  if (apiDisease && apiDisease.severity === "red") {
-    finalSeverity = "red";
-    title = apiDisease.title;
-    summary = apiDisease.summary;
-    source = "api";
-  } else if (visualSeverity === "red") {
-    finalSeverity = "red";
-    title = visualHealth.title;
-    summary = `${visualHealth.summary} Diagnosi visiva forte (${visualScorePercent}%).`;
-    source = "visual";
-  } else if ((apiDisease && apiDisease.severity === "yellow") || visualSeverity === "yellow") {
-    finalSeverity = "yellow";
-    title = apiDisease?.severity === "yellow" ? apiDisease.title : visualHealth.title;
-    summary =
-      apiDisease?.severity === "yellow"
-        ? `${apiDisease.summary} In più, l’immagine mostra segnali visivi di stress (${visualScorePercent}%).`
-        : `${visualHealth.summary} Diagnosi visiva media (${visualScorePercent}%).`;
-    source = apiDisease?.severity === "yellow" ? "api+visual" : "visual";
-  } else if (apiDisease && apiDisease.severity === "green") {
-    finalSeverity = visualSeverity;
-    title = visualSeverity === "green" ? "Nessun problema rilevante" : visualHealth.title;
-    summary =
-      visualSeverity === "green"
-        ? `${apiDisease.summary} L’immagine non mostra forti segnali di stress visivo.`
-        : visualHealth.summary;
-    source = visualSeverity === "green" ? "api+visual" : "visual";
-  } else if (visualHealth) {
-    finalSeverity = visualSeverity;
-    title = visualHealth.title;
-    summary = visualHealth.summary;
-    source = "visual";
+  if (score < DISEASE_YELLOW_THRESHOLD) {
+    return {
+      severity: "green",
+      title: "Nessun problema rilevante",
+      summary: `Risultato malattie molto debole (${scorePercent}%).`
+    };
   }
 
-  if (visualHealth?.suggestions?.length) {
-    extraCare.push(...visualHealth.suggestions);
+  if (score < DISEASE_RED_THRESHOLD) {
+    return {
+      severity: "yellow",
+      title: "Possibile problema da controllare",
+      summary: `${top.description || "Problema non descritto"} (${scorePercent}%).`
+    };
   }
 
   return {
-    severity: finalSeverity,
-    title,
-    summary,
-    source,
-    visualScore: visualScorePercent,
-    extraCare: uniqueStrings(extraCare)
+    severity: "red",
+    title: "Problema probabile rilevato",
+    summary: `${top.description || "Patologia non descritta"} (${scorePercent}%).`
   };
-}
-
-function uniqueStrings(list) {
-  return [...new Set(list.map((item) => String(item).trim()).filter(Boolean))];
 }
 
 function generateCareTipsFromPlantName(scientificName, commonName) {
@@ -948,18 +681,6 @@ function generateCareTipsFromPlantName(scientificName, commonName) {
     };
   }
 
-  if (name.includes("zamioculcas")) {
-    return {
-      water: "Basso",
-      light: "Media o intensa indiretta",
-      tips: [
-        "lascia asciugare il terreno tra un’annaffiatura e l’altra",
-        "evita ristagni nel sottovaso",
-        "controlla che non riceva troppa acqua"
-      ]
-    };
-  }
-
   return {
     water: "Da valutare",
     light: "Luminosa senza eccessi",
@@ -978,7 +699,7 @@ function getSeverityBadge(disease) {
   if (disease?.severity === "yellow") {
     return { label: "Gravità media", className: "severity-yellow" };
   }
-  return { label: "Gravità bassa", className: "severity-green" };
+  return { label: "Info", className: "severity-green" };
 }
 
 function renderAnalysis(analysis) {
@@ -986,7 +707,7 @@ function renderAnalysis(analysis) {
 
   const alternativesHtml = analysis.alternatives && analysis.alternatives.length
     ? `<ul class="result-list">${analysis.alternatives
-        .map((item) => `<li>${escapeHtml(item.name)} — punteggio finale ${escapeHtml(String(item.finalScore))}%</li>`)
+        .map((item) => `<li>${escapeHtml(item.name)} — punteggio ${escapeHtml(String(item.finalScore))}%</li>`)
         .join("")}</ul>`
     : "Nessuna alternativa forte disponibile.";
 
@@ -1016,7 +737,7 @@ function renderAnalysis(analysis) {
       </div>
       <div class="tech-item">
         <div class="tech-label">Suggerimento</div>
-        <div class="tech-value">Attiva “Usa posizione” per migliorare l’affidabilità.</div>
+        <div class="tech-value">Attiva “Usa posizione” per verificare contro l'ecosistema locale.</div>
       </div>
     `;
 
@@ -1029,7 +750,7 @@ function renderAnalysis(analysis) {
             <div class="result-subname">${escapeHtml(analysis.commonName)} • ${escapeHtml(analysis.family)}</div>
           </div>
           <div class="result-hero-score">
-            <div class="result-hero-score-label">Affidabilità finale</div>
+            <div class="result-hero-score-label">Affidabilità Modello</div>
             <div class="result-hero-score-value">${escapeHtml(String(analysis.finalScore))}%</div>
           </div>
         </div>
@@ -1037,11 +758,11 @@ function renderAnalysis(analysis) {
 
       <div class="result-summary-grid">
         <div class="summary-card">
-          <div class="summary-label">Riconoscimento foto</div>
+          <div class="summary-label">Riconoscimento Locale</div>
           <div class="summary-value">${escapeHtml(String(analysis.confidence))}%</div>
         </div>
         <div class="summary-card">
-          <div class="summary-label">Controllo geografico</div>
+          <div class="summary-label">Controllo Geografico</div>
           <div class="summary-value">${escapeHtml(String(analysis.geoScore))}%</div>
         </div>
         <div class="summary-card">
@@ -1058,24 +779,16 @@ function renderAnalysis(analysis) {
         <div class="result-title">Risultato principale</div>
         <div class="result-tech-grid">
           <div class="tech-item">
-            <div class="tech-label">Nome scientifico</div>
+            <div class="tech-label">Classe rilevata (Modello)</div>
             <div class="tech-value">${escapeHtml(analysis.plant)}</div>
           </div>
           <div class="tech-item">
-            <div class="tech-label">Nome comune</div>
+            <div class="tech-label">Nome comune (Approssimato)</div>
             <div class="tech-value">${escapeHtml(analysis.commonName)}</div>
-          </div>
-          <div class="tech-item">
-            <div class="tech-label">Genere</div>
-            <div class="tech-value">${escapeHtml(analysis.genus)}</div>
-          </div>
-          <div class="tech-item">
-            <div class="tech-label">Famiglia</div>
-            <div class="tech-value">${escapeHtml(analysis.family)}</div>
           </div>
         </div>
         <div style="margin-top:12px;">
-          <strong>Valutazione finale:</strong> ${escapeHtml(analysis.health)}
+          <strong>Stato Elaborazione:</strong> ${escapeHtml(analysis.health)}
         </div>
       </div>
 
@@ -1091,10 +804,6 @@ function renderAnalysis(analysis) {
           <strong>${escapeHtml(analysis.disease.title)}</strong><br>
           ${escapeHtml(analysis.disease.summary)}
         </div>
-        <div style="margin-top:12px;">
-          <strong>Fonte valutazione:</strong> ${escapeHtml(analysis.disease.source)}<br>
-          <strong>Punteggio visivo:</strong> ${escapeHtml(String(analysis.disease.visualScore))}%
-        </div>
       </div>
 
       <div class="result-section">
@@ -1105,10 +814,10 @@ function renderAnalysis(analysis) {
       </div>
 
       <div class="result-section">
-        <div class="result-title">Verifica botanica</div>
+        <div class="result-title">Verifica botanica remota (GBIF)</div>
         <div class="result-tech-grid">
           <div class="tech-item">
-            <div class="tech-label">Esito</div>
+            <div class="tech-label">Esito connessione</div>
             <div class="tech-value">${escapeHtml(analysis.gbif.summary)}</div>
           </div>
           <div class="tech-item">
@@ -1116,20 +825,12 @@ function renderAnalysis(analysis) {
             <div class="tech-value">${escapeHtml(analysis.gbif.scientificName)}</div>
           </div>
           <div class="tech-item">
-            <div class="tech-label">Canonical name</div>
-            <div class="tech-value">${escapeHtml(analysis.gbif.canonicalName)}</div>
+            <div class="tech-label">Famiglia Registrata</div>
+            <div class="tech-value">${escapeHtml(analysis.gbif.family)}</div>
           </div>
           <div class="tech-item">
-            <div class="tech-label">Status</div>
-            <div class="tech-value">${escapeHtml(analysis.gbif.status)}</div>
-          </div>
-          <div class="tech-item">
-            <div class="tech-label">Rank</div>
-            <div class="tech-value">${escapeHtml(analysis.gbif.rank)}</div>
-          </div>
-          <div class="tech-item">
-            <div class="tech-label">Confidence GBIF</div>
-            <div class="tech-value">${escapeHtml(String(analysis.gbif.confidence))}</div>
+            <div class="tech-label">Genere Registrato</div>
+            <div class="tech-value">${escapeHtml(analysis.gbif.genus)}</div>
           </div>
         </div>
       </div>
@@ -1142,12 +843,16 @@ function renderAnalysis(analysis) {
       </div>
 
       <div class="result-section">
-        <div class="result-title">Alternative considerate</div>
+        <div class="result-title">Alternative considerate dal modello locale</div>
         ${alternativesHtml}
       </div>
     </div>
   `);
 }
+
+// ---------------------------------------------------------
+// STORICO LOCALE E GESTIONE UI
+// ---------------------------------------------------------
 
 function getHistory() {
   try {
@@ -1197,13 +902,10 @@ function renderHistory() {
       <div class="history-body">
         <div class="history-name">${escapeHtml(item.plant)}</div>
         <div class="history-meta">
-          Affidabilità foto: ${escapeHtml(String(item.confidence))}%<br>
-          Geo score: ${escapeHtml(String(item.geoScore))}%<br>
-          Punteggio finale: ${escapeHtml(String(item.finalScore))}%<br>
-          Gravità: ${escapeHtml(item.severityLabel)}<br>
-          Malattie: ${escapeHtml(item.diseaseSummary)}<br>
-          Database: ${escapeHtml(item.gbifSummary)}<br>
-          Geografia: ${escapeHtml(item.geographySummary)}
+          Inferenza Rete Neurale: ${escapeHtml(String(item.confidence))}%<br>
+          Punteggio Aggregato: ${escapeHtml(String(item.finalScore))}%<br>
+          Database Remoto: ${escapeHtml(item.gbifSummary)}<br>
+          Riscontro Geografico: ${escapeHtml(item.geographySummary)}
         </div>
         <div class="history-date">${escapeHtml(item.date)}</div>
       </div>
@@ -1214,22 +916,6 @@ function renderHistory() {
 function clearHistory() {
   localStorage.removeItem(STORAGE_KEY);
   renderHistory();
-}
-
-function dataURLToBlob(dataURL) {
-  const [header, base64] = dataURL.split(",");
-  const mimeMatch = header.match(/data:(.*?);base64/);
-  const mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
-
-  const binary = atob(base64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-
-  return new Blob([bytes], { type: mime });
 }
 
 function escapeHtml(value) {
@@ -1259,7 +945,6 @@ if (installBtn) {
 
 if (locationBtn) locationBtn.addEventListener("click", requestLocation);
 if (clearHistoryBtn) clearHistoryBtn.addEventListener("click", clearHistory);
-
 window.addEventListener("beforeunload", stopCamera);
 
 if (startCameraBtn) startCameraBtn.addEventListener("click", startCamera);
@@ -1267,7 +952,10 @@ if (takePhotoBtn) takePhotoBtn.addEventListener("click", takePhoto);
 if (resetBtn) resetBtn.addEventListener("click", resetPhoto);
 if (fileInput) fileInput.addEventListener("change", handleFileUpload);
 
+// INIT FASE 1: UI Base e Dati
 loadSavedLocation();
 renderHistory();
-setResultMessage("Nessuna immagine caricata.");
 showPlaceholder();
+
+// INIT FASE 2: Avvio Asincrono Modello AI
+initializeLocalAI();
