@@ -29,7 +29,7 @@ const LOCATION_KEY = "plant_ai_location_v1";
 const KNOWLEDGE_CACHE_KEY = "plant_ai_knowledge_v1";
 
 // SOSTITUISCI CON IL TUO DOMINIO R2 REALE
-const KNOWLEDGE_BASE_URL = "https://r2.tuodominio.com/knowledge.json"; 
+const KNOWLEDGE_BASE_URL = "https://pub-61a4c996169b4df1bd3207906525c2a1.r2.dev"; 
 
 const DISEASE_RED_THRESHOLD = 0.65;
 const DISEASE_YELLOW_THRESHOLD = 0.25;
